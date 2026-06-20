@@ -1,3 +1,3 @@
-export { AurionSession } from './session';
-export { AurionApiClient } from './api';
-export * from './types';
+export { AurionSession } from './session.js';
+export { AurionApiClient } from './api.js';
+export * from './types.js';

@@ -1,7 +1,7 @@
 import * as openpgp from 'openpgp';
 import MiniSearch from 'minisearch';
-import * as AurionCryptoService from './services/crypto.service';
-import { SecurityMode, EncryptedMail, ProcessedMailTokens, GroupKeyMaterial, MailIndexDoc, Base64CipherText } from './types';
+import * as AurionCryptoService from './services/crypto.service.js';
+import { SecurityMode, EncryptedMail, ProcessedMailTokens, GroupKeyMaterial, MailIndexDoc, Base64CipherText } from './types.js';
 
 export class AurionSession {
   public h0: Uint8Array | null = null;
@@ -62,11 +62,11 @@ if (unlocked) {
   /**
    * 🔑 Stratégies de Persistence & Session
    */
-  public async unlockVault(password: string, client_salt: string, mode: SecurityMode): Promise<void> {
-    this.mode = mode;
+  public async unlockVault(password: string): Promise<void> {
+   
     this.h0 = AurionCryptoService.calculateH0(password);
 
-    if (mode === 'Confort') {
+    if (this.mode === 'Confort') {
       await this.persistToIndexedDB(this.h0);
     } 
     

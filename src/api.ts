@@ -1,11 +1,11 @@
-import * as AurionCryptoService from './services/crypto.service';
+import * as AurionCryptoService from './services/crypto.service.js';
 
 import { 
   AuthSessionState, 
   SaltResponse, 
   PublicKeyResponse, 
   PrivateKeyResponse 
-} from './types';
+} from './types.js';
 
 export class AurionApiClient {
   private apiBase: string;
