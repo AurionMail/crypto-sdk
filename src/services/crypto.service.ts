@@ -122,7 +122,7 @@ export async function generateGroupKeys(aliasEmail: string, memberPublicKeys: st
 
 /** Déchiffre en masse une liste de clés privées OpenPGP */
 export async function decryptPrivateKeys(
-  encryptedKeys: Array<{ encrypted_private_key: string }>,
+  encryptedKeys: Array<{ encrypted_private_key: string; identity_email?: string }>,
   passphrase: Uint8Array
 ): Promise<openpgp.PrivateKey[]> {
   
