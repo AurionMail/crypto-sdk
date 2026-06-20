@@ -10,6 +10,10 @@
       "types": "./dist/index.d.ts"
     }
   },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/AurionMail/crypto-sdk.git"
+  },
   "scripts": {
     "build": "tsc",
     "prepublishOnly": "npm run build"
