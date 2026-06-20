@@ -31,7 +31,36 @@ export class AurionSession {
   }
 
   /**
-   * Stratégies de Persistence & Session
+   * Tente une restauration automatique de la session (Boot de l'appli)
+   * Dédié exclusivement au Mode Confort (IndexedDB). Retourne true si le vault est déverrouillé.
+   * const unlocked = await aurionSession.tryAutoUnlock();
+if (unlocked) {
+  // Mode Confort actif ! Tu peux directement télécharger les clefs privées chiffrées 
+  // depuis l'API et exécuter decryptAndLoadPrivateKeys().
+} else {
+  // Rediriger vers l'écran de Login traditionnel (Parano / Extreme / Première connexion Confort)
+}
+   */
+  public async tryAutoUnlock(): Promise<boolean> {
+    if (typeof indexedDB === 'undefined') return false;
+
+    try {
+      const cryptoKey = await this.readKeyFromIndexedDB();
+      if (!cryptoKey) return false;
+
+      // Récupération des octets bruts de h0 depuis la CryptoKey opaque
+      const rawBuffer = await crypto.subtle.exportKey('raw', cryptoKey);
+      this.h0 = new Uint8Array(rawBuffer);
+      this.mode = 'Confort';
+      return true;
+    } catch (error) {
+      console.warn("Échec de la reconnexion automatique:", error);
+      return false;
+    }
+  }
+
+  /**
+   * 🔑 Stratégies de Persistence & Session
    */
   public async unlockVault(password: string, client_salt: string, mode: SecurityMode): Promise<void> {
     this.mode = mode;
@@ -39,29 +68,98 @@ export class AurionSession {
 
     if (mode === 'Confort') {
       await this.persistToIndexedDB(this.h0);
-    } else if (mode === 'Parano') {
-      const b64Key = btoa(String.fromCharCode(...this.h0));
-      sessionStorage.setItem('_aurion_transient_sk', b64Key);
+    } 
+    
+    // 🛡️ Mode 'Parano' & 🌋 Mode 'Extreme' :
+    // h0 reste UNIQUEMENT dans la propriété `this.h0` en RAM.
+    // Au rafraîchissement (F5), l'instance est détruite, h0 s'évapore, déclenchant le bandeau.
+  }
+
+  /**
+   * 🧼 Nettoie la session en cours et efface les traces dans IndexedDB
+   */
+  public async clearSession(): Promise<void> {
+    this.h0 = null;
+    this.pgpPrivateKey = null;
+    this.mode = null;
+    this.searchIndex = new MiniSearch<MailIndexDoc>({
+      fields: ['text'],
+      storeFields: ['id']
+    });
+
+    if (typeof indexedDB !== 'undefined') {
+      try {
+        const request = indexedDB.open('AurionStorage', 1);
+        request.onsuccess = (event: any) => {
+          const db = event.target.result;
+          if (db.objectStoreNames.contains('session')) {
+            const transaction = db.transaction('session', 'readwrite');
+            transaction.objectStore('session').delete('master_crypto_key');
+          }
+        };
+      } catch (e) {
+        console.error("Erreur lors du nettoyage d'IndexedDB:", e);
+      }
     }
-    // 'Extreme' -> la clé reste uniquement dans `this.masterKey` en RAM
   }
 
   private async persistToIndexedDB(keyData: Uint8Array): Promise<void> {
     if (typeof indexedDB === 'undefined') return;
 
-    const cryptoKey = await AurionCryptoService.importWebCryptoKey(keyData);
-    const request = indexedDB.open('AurionStorage', 1);
-    
-    request.onupgradeneeded = (event: any) => {
-      const db = event.target.result;
-      if (!db.objectStoreNames.contains('session')) db.createObjectStore('session');
-    };
+    const cryptoKey = await crypto.subtle.importKey(
+      'raw',
+      keyData.buffer as ArrayBuffer,
+      { name: 'AES-GCM', length: 256 },
+      true, // Nécessaire pour tryAutoUnlock
+      ['encrypt', 'decrypt']
+    );
 
-    request.onsuccess = (event: any) => {
-      const db = event.target.result;
-      const transaction = db.transaction('session', 'readwrite');
-      transaction.objectStore('session').put(cryptoKey, 'master_crypto_key');
-    };
+    return new Promise((resolve, reject) => {
+      const request = indexedDB.open('AurionStorage', 1);
+      
+      request.onupgradeneeded = (event: any) => {
+        const db = event.target.result;
+        if (!db.objectStoreNames.contains('session')) db.createObjectStore('session');
+      };
+
+      request.onsuccess = (event: any) => {
+        const db = event.target.result;
+        const transaction = db.transaction('session', 'readwrite');
+        const store = transaction.objectStore('session');
+        
+        const putRequest = store.put(cryptoKey, 'master_crypto_key');
+        putRequest.onsuccess = () => resolve();
+        putRequest.onerror = () => reject(putRequest.error);
+      };
+
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  private readKeyFromIndexedDB(): Promise<CryptoKey | null> {
+    return new Promise((resolve, reject) => {
+      const request = indexedDB.open('AurionStorage', 1);
+
+      request.onupgradeneeded = (event: any) => {
+        const db = event.target.result;
+        if (!db.objectStoreNames.contains('session')) db.createObjectStore('session');
+      };
+
+      request.onsuccess = (event: any) => {
+        const db = event.target.result;
+        if (!db.objectStoreNames.contains('session')) {
+          resolve(null);
+          return;
+        }
+        const transaction = db.transaction('session', 'readonly');
+        const getRequest = transaction.objectStore('session').get('master_crypto_key');
+
+        getRequest.onsuccess = () => resolve(getRequest.result || null);
+        getRequest.onerror = () => reject(getRequest.error);
+      };
+
+      request.onerror = () => reject(request.error);
+    });
   }
 
   /**
@@ -147,13 +245,9 @@ export class AurionSession {
       throw new Error("Vault is locked. Call unlockVault first to generate h0.");
     }
 
-    // 1. Dérivation de la passphrase locale (Argon2id de h0 + salt_client)
     const pgpPassphrase = AurionCryptoService.derivePgpPassphrase(this.h0, saltClient);
-
-    // 2. Déchiffrement des structures de clés
     const decryptedKeys = await AurionCryptoService.decryptPrivateKeys(encryptedKeys, pgpPassphrase);
 
-    // 3. Stockage volatile dans l'instance SDK de la clé primaire pour le batching
     if (decryptedKeys.length > 0) {
       this.setPrimaryPrivateKey(decryptedKeys[0]);
     }

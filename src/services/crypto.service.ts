@@ -51,12 +51,6 @@ export function generateSalt(): string {
     .replace(/=+$/, "");
 }
 
-/**
- * 🔑 DÉRIVATIONS ARGON2ID & GESTION DES PREUVES
- */
-
-
-
 /** calcule h0 (sans sel) pour servir de clé maîtresse volatile */
 export function calculateH0(password: string): Uint8Array {
   return nobleArgon2id(utf8Encode(password), STATIC_EMPTY_SALT, ARGON2_CONFIG);
@@ -74,10 +68,6 @@ export function derivePgpPassphrase(h0: Uint8Array, saltClient: string): Uint8Ar
   return derivedBytes;
 }
 
-/**
- * 🗄️ PERSISTENCE (WEBCRYPTO)
- */
-
 /** Génère une clé opaque WebCrypto asymétrique AES-GCM non exportable */
 export async function importWebCryptoKey(keyData: Uint8Array): Promise<CryptoKey> {
   return crypto.subtle.importKey(
@@ -88,10 +78,6 @@ export async function importWebCryptoKey(keyData: Uint8Array): Promise<CryptoKey
     ['encrypt', 'decrypt']
   );
 }
-
-/**
- * 🔒 OPÉRATIONS DE CHIFFREMENT OPENPGP (DESTINATAIRES / SOI-MÊME)
- */
 
 export async function encryptForRecipient(recipientKey: openpgp.PublicKey, plaintext: string): Promise<Base64CipherText> {
   const message = await openpgp.createMessage({ text: plaintext });
@@ -112,10 +98,6 @@ export async function decryptCiphertext(privateKey: openpgp.PrivateKey, cipherte
   const { data } = await openpgp.decrypt({ message, decryptionKeys: privateKey });
   return data as string;
 }
-
-/**
- * 👥 GESTION DES CLÉS DE GROUPE PARTAGÉES (ALIAS)
- */
 
 export async function generateGroupKeys(aliasEmail: string, memberPublicKeys: string[]): Promise<GroupKeyMaterial> {
   const { privateKey } = await openpgp.generateKey({
@@ -159,4 +141,58 @@ export async function decryptPrivateKeys(
   }
 
   return decryptedKeys;
+}
+
+/**
+ * Chiffre les identifiants mail en utilisant la clé h0.
+ * Retourne une chaîne Base64 contenant [IV (12 octets) + Ciphertext].
+ */
+export async function encryptMailCredentials(plaintext: string, h0: Uint8Array): Promise<string> {
+  const cryptoKey = await importWebCryptoKey(h0);
+
+  const iv = new Uint8Array(12);
+  crypto.getRandomValues(iv);
+
+  const plaintextBytes = utf8Encode(plaintext);
+  
+  // FIX: Passer le buffer sous-jacent casté en ArrayBuffer
+  const encryptedBuffer = await crypto.subtle.encrypt(
+    { name: 'AES-GCM', iv },
+    cryptoKey,
+    plaintextBytes.buffer as ArrayBuffer
+  );
+
+  const encryptedBytes = new Uint8Array(encryptedBuffer);
+
+  const combinedBytes = new Uint8Array(iv.length + encryptedBytes.length);
+  combinedBytes.set(iv, 0);
+  combinedBytes.set(encryptedBytes, iv.length);
+
+  const binaryString = Array.from(combinedBytes, (byte) => String.fromCharCode(byte)).join('');
+  return btoa(binaryString);
+}
+
+/**
+ * Déchiffre les identifiants mail à partir de la chaîne Base64 générée par encryptMailCredentials.
+ */
+export async function decryptMailCredentials(combinedBase64: string, h0: Uint8Array): Promise<string> {
+  const cryptoKey = await importWebCryptoKey(h0);
+
+  const binaryString = atob(combinedBase64);
+  const combinedBytes = Uint8Array.from(binaryString, (char) => char.charCodeAt(0));
+
+  const iv = combinedBytes.slice(0, 12);
+  const ciphertextBytes = combinedBytes.slice(12);
+
+  if (iv.length < 12) {
+    throw new Error('Données chiffrées invalides ou corrompues (IV manquant)');
+  }
+
+  const decryptedBuffer = await crypto.subtle.decrypt(
+    { name: 'AES-GCM', iv },
+    cryptoKey,
+    ciphertextBytes.buffer as ArrayBuffer
+  );
+
+  return utf8Decode(new Uint8Array(decryptedBuffer));
 }
