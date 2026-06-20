@@ -36,11 +36,8 @@ export class AurionApiClient {
     return headers;
   }
 
-  /**
-   * Récupération des Sels utilisateur
-   */
-  public async getSalts(email: string): Promise<SaltResponse> {
-    const res = await fetch(`${this.apiBase}/auth/salts`, {
+  public async getSalts(email: string): Promise<SaltResponse & { id: string | null }> {
+    const res = await fetch(`${this.apiBase}/auth/salt`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email })
@@ -50,18 +47,22 @@ export class AurionApiClient {
     return res.json();
   }
 
-  /**
-   * Inscription d'un nouvel utilisateur
-   */
-  public async signup(email: string, password: string, saltServer: string, saltClient: string): Promise<any> {
+  public async signup(
+    email: string, 
+    clientPasswordHashed: string, 
+    serverPasswordExternal: string, 
+    saltServer: string, 
+    saltClient: string
+  ): Promise<AuthSessionState> {
     const res = await fetch(`${this.apiBase}/auth/signup`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ 
         email, 
-        password, 
-        salt_server: saltServer, 
-        salt_client: saltClient 
+        password: clientPasswordHashed, 
+        server_password: serverPasswordExternal,
+        salt_client: saltClient, 
+        salt_server: saltServer
       })
     });
 
@@ -69,10 +70,7 @@ export class AurionApiClient {
     return res.json();
   }
 
-  /**
-   * Connexion et dérivation h0 locale via Argon2id (Zero-Knowledge Proof of Password)
-   */
- public async login(email: string, password: string, saltServer: string): Promise<AuthSessionState & { data: any }> {
+  public async login(email: string, password: string, saltServer: string): Promise<AuthSessionState & { data: any }> {
     
     // 1. Génération locale de h0 en RAM (Mot de passe -> Secret local abstrait)
     const h0 = AurionCryptoService.calculateH0(password);
@@ -80,11 +78,11 @@ export class AurionApiClient {
     // 2. Génération de la preuve finale h1 en combinant h0 et le sel serveur
     const serverProof = AurionCryptoService.calculateServerProof(h0, saltServer);
 
-    // 3. Envoi de la preuve au serveur
+    // 3. Envoi de la preuve au serveur sous la clé "password"
     const res = await fetch(`${this.apiBase}/auth/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, proof: serverProof })
+      body: JSON.stringify({ email, password: serverProof })
     });
 
     if (!res.ok) throw new Error('Invalid credentials');
@@ -102,10 +100,7 @@ export class AurionApiClient {
     };
   }
 
-  /**
-   * Validation de la session existante
-   */
-  public async validateSession(): Promise<any> {
+  public async validateSession(): Promise<{ user_id: string; email: string }> {
     if (!this.token) throw new Error('Not authenticated');
 
     const res = await fetch(`${this.apiBase}/auth/session`, {
@@ -116,9 +111,6 @@ export class AurionApiClient {
     return res.json();
   }
 
-  /**
-   * Récupère la clé publique d'un destinataire tiers
-   */
   public async getPublicKey(email: string): Promise<PublicKeyResponse> {
     const res = await fetch(`${this.apiBase}/keys/public/${encodeURIComponent(email)}`);
 
@@ -130,24 +122,18 @@ export class AurionApiClient {
     return res.json();
   }
 
-  /**
-   * Récupère sa propre clé privée chiffrée
-   */
-  public async getEncryptedPrivateKey(): Promise<PrivateKeyResponse> {
+  public async getEncryptedPrivateKey(): Promise<{ keys: PrivateKeyResponse[] }> {
     if (!this.token) throw new Error('Not authenticated');
 
     const res = await fetch(`${this.apiBase}/keys/private/me`, {
       headers: this.getHeaders()
     });
 
-    if (!res.ok) throw new Error('Failed to fetch encrypted private key');
+    if (!res.ok) throw new Error('Failed to fetch encrypted private keys');
     return res.json();
   }
 
-  /**
-   * Publication de la clé publique de l'identité (WKD ready)
-   */
-  public async uploadPublicKey(email: string, armoredKey: string, wkdHash: string): Promise<void> {
+  public async uploadPublicKey(email: string, armoredKey: string, wkdHash: string): Promise<{ id: string }> {
     const res = await fetch(`${this.apiBase}/keys/public`, {
       method: 'POST',
       headers: this.getHeaders(),
@@ -159,12 +145,10 @@ export class AurionApiClient {
     });
 
     if (!res.ok) throw new Error('Public key upload failed');
+    return res.json();
   }
 
-  /**
-   * Sauvegarde de sa propre clé privée (déjà chiffrée localement via la clé maîtresse)
-   */
-  public async uploadPrivateKey(email: string, encryptedPrivateKey: string): Promise<void> {
+  public async uploadPrivateKey(email: string, encryptedPrivateKey: string): Promise<{ id: string }> {
     const res = await fetch(`${this.apiBase}/keys/private`, {
       method: 'POST',
       headers: this.getHeaders(),
@@ -175,5 +159,49 @@ export class AurionApiClient {
     });
 
     if (!res.ok) throw new Error('Private key upload failed');
+    return res.json();
   }
+
+
+public async verifyMailServer(email: string, serverPassword: string): Promise<{ status: string }> {
+  const res = await fetch(`${this.apiBase}/auth/verify`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, server_password: serverPassword })
+  });
+
+  if (!res.ok) throw new Error('Mail server authentication failed');
+  return res.json();
 }
+
+
+public async syncRouting(): Promise<any> {
+  if (!this.token) throw new Error('Not authenticated');
+
+  const res = await fetch(`${this.apiBase}/sync/routing`, {
+    headers: this.getHeaders()
+  });
+
+  if (!res.ok) throw new Error('Failed to fetch routing sync state');
+  return res.json();
+}
+
+
+public async uploadSynchronizedKeys(payload: {
+  identity_id: string;
+  armored_public_key: string;
+  wkd_hash: string;
+  shares: Array<{ user_id: string; encrypted_private_key: string }>;
+}): Promise<void> {
+  if (!this.token) throw new Error('Not authenticated');
+
+  const res = await fetch(`${this.apiBase}/keys/sync`, {
+    method: 'POST',
+    headers: this.getHeaders(),
+    body: JSON.stringify(payload)
+  });
+
+  if (!res.ok) throw new Error('Key synchronization upload failed');
+}
+}
+

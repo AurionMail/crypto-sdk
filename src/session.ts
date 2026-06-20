@@ -6,6 +6,10 @@ import { SecurityMode, EncryptedMail, ProcessedMailTokens, GroupKeyMaterial, Mai
 export class AurionSession {
   public h0: Uint8Array | null = null;
   private pgpPrivateKey: openpgp.PrivateKey | null = null;
+  
+  // 🔑 Nouveau : Gestionnaire multi-clés pour les Alias et les Groupes (Map: Email -> Instance OpenPGP)
+  private identitiesKeyring: Map<string, openpgp.PrivateKey> = new Map();
+  
   private searchIndex: MiniSearch<MailIndexDoc>;
   private mode: SecurityMode | null = null;
 
@@ -25,22 +29,18 @@ export class AurionSession {
     this.pgpPrivateKey = privateKey;
   }
 
-  private getPrimaryPrivateKey(): openpgp.PrivateKey {
-    if (!this.pgpPrivateKey) throw new Error('No private key loaded in current AurionSession');
+  /**
+   * Récupère une clé privée spécifique depuis le Keyring.
+   * Si aucun e-mail n'est fourni, bascule automatiquement sur la clé principale.
+   */
+  private getPrivateKeyForIdentity(email?: string): openpgp.PrivateKey {
+    if (email && this.identitiesKeyring.has(email.toLowerCase())) {
+      return this.identitiesKeyring.get(email.toLowerCase())!;
+    }
+    if (!this.pgpPrivateKey) throw new Error('No primary private key loaded in current AurionSession');
     return this.pgpPrivateKey;
   }
 
-  /**
-   * Tente une restauration automatique de la session (Boot de l'appli)
-   * Dédié exclusivement au Mode Confort (IndexedDB). Retourne true si le vault est déverrouillé.
-   * const unlocked = await aurionSession.tryAutoUnlock();
-if (unlocked) {
-  // Mode Confort actif ! Tu peux directement télécharger les clefs privées chiffrées 
-  // depuis l'API et exécuter decryptAndLoadPrivateKeys().
-} else {
-  // Rediriger vers l'écran de Login traditionnel (Parano / Extreme / Première connexion Confort)
-}
-   */
   public async tryAutoUnlock(): Promise<boolean> {
     if (typeof indexedDB === 'undefined') return false;
 
@@ -48,7 +48,6 @@ if (unlocked) {
       const cryptoKey = await this.readKeyFromIndexedDB();
       if (!cryptoKey) return false;
 
-      // Récupération des octets bruts de h0 depuis la CryptoKey opaque
       const rawBuffer = await crypto.subtle.exportKey('raw', cryptoKey);
       this.h0 = new Uint8Array(rawBuffer);
       this.mode = 'Confort';
@@ -59,28 +58,17 @@ if (unlocked) {
     }
   }
 
-  /**
-   * 🔑 Stratégies de Persistence & Session
-   */
   public async unlockVault(password: string): Promise<void> {
-   
     this.h0 = AurionCryptoService.calculateH0(password);
-
     if (this.mode === 'Confort') {
       await this.persistToIndexedDB(this.h0);
     } 
-    
-    // 🛡️ Mode 'Parano' & 🌋 Mode 'Extreme' :
-    // h0 reste UNIQUEMENT dans la propriété `this.h0` en RAM.
-    // Au rafraîchissement (F5), l'instance est détruite, h0 s'évapore, déclenchant le bandeau.
   }
 
-  /**
-   * 🧼 Nettoie la session en cours et efface les traces dans IndexedDB
-   */
   public async clearSession(): Promise<void> {
     this.h0 = null;
     this.pgpPrivateKey = null;
+    this.identitiesKeyring.clear(); // 🧼 Nettoyage du multi-trousseau
     this.mode = null;
     this.searchIndex = new MiniSearch<MailIndexDoc>({
       fields: ['text'],
@@ -110,28 +98,24 @@ if (unlocked) {
       'raw',
       keyData.buffer as ArrayBuffer,
       { name: 'AES-GCM', length: 256 },
-      true, // Nécessaire pour tryAutoUnlock
+      true,
       ['encrypt', 'decrypt']
     );
 
     return new Promise((resolve, reject) => {
       const request = indexedDB.open('AurionStorage', 1);
-      
       request.onupgradeneeded = (event: any) => {
         const db = event.target.result;
         if (!db.objectStoreNames.contains('session')) db.createObjectStore('session');
       };
-
       request.onsuccess = (event: any) => {
         const db = event.target.result;
         const transaction = db.transaction('session', 'readwrite');
         const store = transaction.objectStore('session');
-        
         const putRequest = store.put(cryptoKey, 'master_crypto_key');
         putRequest.onsuccess = () => resolve();
         putRequest.onerror = () => reject(putRequest.error);
       };
-
       request.onerror = () => reject(request.error);
     });
   }
@@ -139,42 +123,34 @@ if (unlocked) {
   private readKeyFromIndexedDB(): Promise<CryptoKey | null> {
     return new Promise((resolve, reject) => {
       const request = indexedDB.open('AurionStorage', 1);
-
       request.onupgradeneeded = (event: any) => {
         const db = event.target.result;
         if (!db.objectStoreNames.contains('session')) db.createObjectStore('session');
       };
-
       request.onsuccess = (event: any) => {
         const db = event.target.result;
-        if (!db.objectStoreNames.contains('session')) {
-          resolve(null);
-          return;
-        }
+        if (!db.objectStoreNames.contains('session')) { resolve(null); return; }
         const transaction = db.transaction('session', 'readonly');
         const getRequest = transaction.objectStore('session').get('master_crypto_key');
-
         getRequest.onsuccess = () => resolve(getRequest.result || null);
         getRequest.onerror = () => reject(getRequest.error);
       };
-
       request.onerror = () => reject(request.error);
     });
   }
 
-  /**
-   * Routage vers le service Crypto délégataire
-   */
   public async encryptForRecipient(recipientKey: openpgp.PublicKey, plaintext: string): Promise<Base64CipherText> {
     return AurionCryptoService.encryptForRecipient(recipientKey, plaintext);
   }
 
-  public async encryptForSelf(plaintext: string): Promise<Base64CipherText> {
-    return AurionCryptoService.encryptForSelf(this.getPrimaryPrivateKey(), plaintext);
+  // Permet de choisir l'identité émettrice pour chiffrer pour soi-même
+  public async encryptForSelf(plaintext: string, identityEmail?: string): Promise<Base64CipherText> {
+    return AurionCryptoService.encryptForSelf(this.getPrivateKeyForIdentity(identityEmail), plaintext);
   }
 
-  public async decryptCiphertext(ciphertext: Base64CipherText): Promise<string> {
-    return AurionCryptoService.decryptCiphertext(this.getPrimaryPrivateKey(), ciphertext);
+  // Tente de déchiffrer avec une identité spécifique, sinon utilise la clé par défaut
+  public async decryptCiphertext(ciphertext: Base64CipherText, identityEmail?: string): Promise<string> {
+    return AurionCryptoService.decryptCiphertext(this.getPrivateKeyForIdentity(identityEmail), ciphertext);
   }
 
   public async importPublicKey(armored: string): Promise<openpgp.PublicKey> {
@@ -186,12 +162,9 @@ if (unlocked) {
   }
 
   public async setPgpPrivateKey(armoredKey: string): Promise<void> {
-  this.pgpPrivateKey = await openpgp.readPrivateKey({ armoredKey });
+    this.pgpPrivateKey = await openpgp.readPrivateKey({ armoredKey });
   }
 
-  /**
-   * Indexation & Recherche en RAM (Blind Indexing)
-   */
   public extractSearchTokens(clearTextBody: string): string[] {
     const cleanHtml = clearTextBody
       .replace(/<style([\s\S]*?)<\/style>/gi, '')
@@ -213,11 +186,8 @@ if (unlocked) {
     return this.searchIndex.search(normalizedQuery).map(res => res.id);
   }
 
-  /**
-   * Traitement Batch & Nettoyage RAM agressif
-   */
   public async processMailBatch(encryptedMails: Array<EncryptedMail>): Promise<Array<ProcessedMailTokens>> {
-    const privateKey = this.getPrimaryPrivateKey();
+    const privateKey = this.getPrivateKeyForIdentity(); // Utilise la clé par défaut pour l'indexation batch
     const results: Array<ProcessedMailTokens> = [];
 
     for (const mail of encryptedMails) {
@@ -228,8 +198,7 @@ if (unlocked) {
         
         this.searchIndex.add({ id: mail.id, text: tokens.join(' ') });
         results.push({ id: mail.id, tokens });
-      }finally {
-        // Purge critique mémoire RAM
+      } finally {
         if (clearTextBody) clearTextBody = "";
         clearTextBody = null;
       }
@@ -237,8 +206,12 @@ if (unlocked) {
     return results;
   }
 
+  /**
+   * 🔥 MODIFIÉ : Déchiffre en masse et indexe intelligemment TOUTES les identités chargées
+   * (Utile lors de l'appel à /keys/private/me ou via la liste extraite de /sync/routing)
+   */
   public async decryptAndLoadPrivateKeys(
-    encryptedKeys: Array<{ encrypted_private_key: string }>,
+    encryptedKeys: Array<{ encrypted_private_key: string; identity_email?: string }>,
     saltClient: string
   ): Promise<openpgp.PrivateKey[]> {
     if (!this.h0) {
@@ -248,10 +221,81 @@ if (unlocked) {
     const pgpPassphrase = AurionCryptoService.derivePgpPassphrase(this.h0, saltClient);
     const decryptedKeys = await AurionCryptoService.decryptPrivateKeys(encryptedKeys, pgpPassphrase);
 
-    if (decryptedKeys.length > 0) {
-      this.setPrimaryPrivateKey(decryptedKeys[0]);
+    // Indexation dans le multi-keyring local
+    for (let i = 0; i < decryptedKeys.length; i++) {
+      const key = decryptedKeys[i];
+      const metadata = encryptedKeys[i];
+
+      // Si le serveur nous a fourni l'e-mail de l'identité lié à la clé, on l'indexe précisément
+      if (metadata.identity_email) {
+        this.identitiesKeyring.set(metadata.identity_email.toLowerCase(), key);
+      } else {
+        // Fallback historique (OpenPGP userID)
+        const userIds = key.getUserIDs();
+        if (userIds.length > 0) {
+          this.identitiesKeyring.set(userIds[0].toLowerCase(), key);
+        }
+      }
+
+      // La première clé reste définie comme la clé maîtresse/principale de session
+      if (i === 0 && !this.pgpPrivateKey) {
+        this.setPrimaryPrivateKey(key);
+      }
     }
 
     return decryptedKeys;
+  }
+
+  /**
+   * Permet d'injecter manuellement une clé déchiffrée isolée directement 
+   * dans le Keyring au cours du flux de traitement itératif de `/sync/routing`.
+   */
+  public loadSingleDecryptedKey(email: string, privateKey: openpgp.PrivateKey): void {
+    this.identitiesKeyring.set(email.toLowerCase(), privateKey);
+    if (!this.pgpPrivateKey) {
+      this.setPrimaryPrivateKey(privateKey);
+    }
+  }
+
+  public async syncGroupKeys(
+    identityId: string,
+    groupEmail: string,
+    wkdHash: string,
+    members: Array<{ user_id: string; public_key: string }>
+  ): Promise<{
+    identity_id: string;
+    armored_public_key: string;
+    wkd_hash: string;
+    shares: Array<{ user_id: string; encrypted_private_key: string }>;
+  }> {
+    const memberArmoredPublicKeys = members.map(m => m.public_key);
+    const groupMaterial = await AurionCryptoService.generateGroupKeys(groupEmail, memberArmoredPublicKeys);
+
+    const parsedPrivateKey = await openpgp.readPrivateKey({ 
+      armoredKey: groupMaterial.groupPrivateKeyEncrypted 
+    });
+
+    const armoredGroupPublicKey = parsedPrivateKey.toPublic().armor();
+    const sharesPayload: Array<{ user_id: string; encrypted_private_key: string }> = [];
+
+    for (const m of members) {
+      const memberKey = await openpgp.readKey({ armoredKey: m.public_key });
+      const fingerprint = memberKey.getFingerprint();
+      const encryptedShare = groupMaterial.encryptedShares[fingerprint];
+      
+      if (encryptedShare) {
+        sharesPayload.push({
+          user_id: m.user_id,
+          encrypted_private_key: AurionCryptoService.toBase64(encryptedShare)
+        });
+      }
+    }
+
+    return {
+      identity_id: identityId,
+      armored_public_key: armoredGroupPublicKey,
+      wkd_hash: wkdHash,
+      shares: sharesPayload
+    };
   }
 }
