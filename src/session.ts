@@ -185,8 +185,8 @@ if (unlocked) {
     return AurionCryptoService.generateGroupKeys(aliasEmail, memberPublicKeys);
   }
 
-  public setPgpPrivateKey(armoredKey: string): void {
-    openpgp.readPrivateKey({ armoredKey }).then(key => { this.pgpPrivateKey = key; });
+  public async setPgpPrivateKey(armoredKey: string): Promise<void> {
+  this.pgpPrivateKey = await openpgp.readPrivateKey({ armoredKey });
   }
 
   /**

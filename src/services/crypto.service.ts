@@ -154,13 +154,11 @@ export async function encryptMailCredentials(plaintext: string, h0: Uint8Array):
   crypto.getRandomValues(iv);
 
   const plaintextBytes = utf8Encode(plaintext);
-  
-  // FIX: Passer le buffer sous-jacent casté en ArrayBuffer
   const encryptedBuffer = await crypto.subtle.encrypt(
-    { name: 'AES-GCM', iv },
-    cryptoKey,
-    plaintextBytes.buffer as ArrayBuffer
-  );
+  { name: 'AES-GCM', iv },
+  cryptoKey,
+  plaintextBytes.buffer as ArrayBuffer // Cast direct du buffer propre
+);
 
   const encryptedBytes = new Uint8Array(encryptedBuffer);
 
@@ -188,11 +186,12 @@ export async function decryptMailCredentials(combinedBase64: string, h0: Uint8Ar
     throw new Error('Données chiffrées invalides ou corrompues (IV manquant)');
   }
 
-  const decryptedBuffer = await crypto.subtle.decrypt(
-    { name: 'AES-GCM', iv },
-    cryptoKey,
-    ciphertextBytes.buffer as ArrayBuffer
-  );
+
+const decryptedBuffer = await crypto.subtle.decrypt(
+  { name: 'AES-GCM', iv: iv.buffer as ArrayBuffer }, // IV isolé
+  cryptoKey,
+  ciphertextBytes.buffer as ArrayBuffer
+);
 
   return utf8Decode(new Uint8Array(decryptedBuffer));
 }
