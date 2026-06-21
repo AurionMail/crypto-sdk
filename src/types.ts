@@ -47,3 +47,7 @@ export interface PrivateKeyResponse {
   identity_email: string;
   encrypted_private_key: string;
 }
+
+export interface GetEncryptedPrivateKeysResponse {
+  keys: PrivateKeyResponse[];
+}

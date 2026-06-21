@@ -4,7 +4,7 @@ import {
   AuthSessionState, 
   SaltResponse, 
   PublicKeyResponse, 
-  PrivateKeyResponse 
+  GetEncryptedPrivateKeysResponse
 } from './types.js';
 
 export class AurionApiClient {
@@ -122,7 +122,7 @@ export class AurionApiClient {
     return res.json();
   }
 
-  public async getEncryptedPrivateKey(): Promise<{ keys: PrivateKeyResponse[] }> {
+  public async getEncryptedPrivateKey(): Promise<GetEncryptedPrivateKeysResponse> {
     if (!this.token) throw new Error('Not authenticated');
 
     const res = await fetch(`${this.apiBase}/keys/private/me`, {
@@ -130,7 +130,7 @@ export class AurionApiClient {
     });
 
     if (!res.ok) throw new Error('Failed to fetch encrypted private keys');
-    return res.json();
+    return res.json() as Promise<GetEncryptedPrivateKeysResponse>;
   }
 
   public async uploadPublicKey(email: string, armoredKey: string, wkdHash: string): Promise<{ id: string }> {
