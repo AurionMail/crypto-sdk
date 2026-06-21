@@ -51,3 +51,7 @@ export interface PrivateKeyResponse {
 export interface GetEncryptedPrivateKeysResponse {
   keys: PrivateKeyResponse[];
 }
+
+export interface GetServerLoginResponse {
+  server_password_encrypted: string;
+}

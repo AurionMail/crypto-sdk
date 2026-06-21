@@ -4,7 +4,8 @@ import {
   AuthSessionState, 
   SaltResponse, 
   PublicKeyResponse, 
-  GetEncryptedPrivateKeysResponse
+  GetEncryptedPrivateKeysResponse,
+  GetServerLoginResponse
 } from './types.js';
 
 export class AurionApiClient {
@@ -131,6 +132,20 @@ export class AurionApiClient {
 
     if (!res.ok) throw new Error('Failed to fetch encrypted private keys');
     return res.json() as Promise<GetEncryptedPrivateKeysResponse>;
+  }
+
+  /**
+   * Récupère le mot de passe serveur chiffré de l'utilisateur authentifié
+   */
+  public async getServerLogin(): Promise<GetServerLoginResponse> {
+    if (!this.token) throw new Error('Not authenticated');
+
+    const res = await fetch(`${this.apiBase}/server`, {
+      headers: this.getHeaders()
+    });
+
+    if (!res.ok) throw new Error('Failed to fetch server login credentials');
+    return res.json() as Promise<GetServerLoginResponse>;
   }
 
   public async uploadPublicKey(email: string, armoredKey: string, wkdHash: string): Promise<{ id: string }> {
