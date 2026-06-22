@@ -1,24 +1,26 @@
 import * as openpgp from 'openpgp';
 import MiniSearch from 'minisearch';
 import * as AurionCryptoService from './services/crypto.service.js';
-import { SecurityMode, EncryptedMail, ProcessedMailTokens, GroupKeyMaterial, MailIndexDoc, Base64CipherText } from './types.js';
+import { SecurityMode, EncryptedMail, ProcessedMailTokens, GroupKeyMaterial, MailIndexDoc, Base64CipherText, AurionStorageDriver } from './types.js';
 
 export class AurionSession {
   public h0: Uint8Array | null = null;
   private pgpPrivateKey: openpgp.PrivateKey | null = null;
-  
-  // 🔑 Nouveau : Gestionnaire multi-clés pour les Alias et les Groupes (Map: Email -> Instance OpenPGP)
   private identitiesKeyring: Map<string, openpgp.PrivateKey> = new Map();
-  
   private searchIndex: MiniSearch<MailIndexDoc>;
   private mode: SecurityMode | null = null;
+  private storageDriver: AurionStorageDriver | null = null; // Injection du driver alternatif
 
   private static readonly STOP_WORDS = new Set([
     'le', 'la', 'les', 'de', 'des', 'un', 'une', 'et', 'en', 'du', 'au', 'aux', 'pour', 'dans', 'par', 'sur', 'qui', 'que', 'quoi', 'ce', 'cette',
     'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'is', 'it', 'this', 'that'
   ]);
 
-  constructor() {
+  /**
+   * Le constructeur accepte un driver de stockage optionnel pour découpler la persistance
+   */
+  constructor(storageDriver: AurionStorageDriver | null = null) {
+    this.storageDriver = storageDriver;
     this.searchIndex = new MiniSearch<MailIndexDoc>({
       fields: ['text'],
       storeFields: ['id']
@@ -29,10 +31,6 @@ export class AurionSession {
     this.pgpPrivateKey = privateKey;
   }
 
-  /**
-   * Récupère une clé privée spécifique depuis le Keyring.
-   * Si aucun e-mail n'est fourni, bascule automatiquement sur la clé principale.
-   */
   private getPrivateKeyForIdentity(email?: string): openpgp.PrivateKey {
     if (email && this.identitiesKeyring.has(email.toLowerCase())) {
       return this.identitiesKeyring.get(email.toLowerCase())!;
@@ -41,11 +39,14 @@ export class AurionSession {
     return this.pgpPrivateKey;
   }
 
+  /**
+   * Restauration via le driver abstrait
+   */
   public async tryAutoUnlock(): Promise<boolean> {
-    if (typeof indexedDB === 'undefined') return false;
+    if (!this.storageDriver) return false;
 
     try {
-      const cryptoKey = await this.readKeyFromIndexedDB();
+      const cryptoKey = await this.storageDriver.readMasterKey();
       if (!cryptoKey) return false;
 
       const rawBuffer = await crypto.subtle.exportKey('raw', cryptoKey);
@@ -53,102 +54,49 @@ export class AurionSession {
       this.mode = 'Confort';
       return true;
     } catch (error) {
-      console.warn("Échec de la reconnexion automatique:", error);
+      console.warn("Échec de la reconnexion automatique via le storage driver:", error);
       return false;
     }
   }
 
   public async unlockVault(password: string): Promise<void> {
     this.h0 = AurionCryptoService.calculateH0(password);
-    if (this.mode === 'Confort') {
-      await this.persistToIndexedDB(this.h0);
+    
+    if (this.mode === 'Confort' && this.storageDriver) {
+      const cryptoKey = await crypto.subtle.importKey(
+        'raw',
+        this.h0.buffer as ArrayBuffer,
+        { name: 'AES-GCM', length: 256 },
+        true, // Nécessaire pour tryAutoUnlock via exportKey('raw')
+        ['encrypt', 'decrypt']
+      );
+      await this.storageDriver.saveMasterKey(cryptoKey);
     } 
   }
 
   public async clearSession(): Promise<void> {
     this.h0 = null;
     this.pgpPrivateKey = null;
-    this.identitiesKeyring.clear(); // 🧼 Nettoyage du multi-trousseau
+    this.identitiesKeyring.clear();
     this.mode = null;
     this.searchIndex = new MiniSearch<MailIndexDoc>({
       fields: ['text'],
       storeFields: ['id']
     });
 
-    if (typeof indexedDB !== 'undefined') {
-      try {
-        const request = indexedDB.open('AurionStorage', 1);
-        request.onsuccess = (event: any) => {
-          const db = event.target.result;
-          if (db.objectStoreNames.contains('session')) {
-            const transaction = db.transaction('session', 'readwrite');
-            transaction.objectStore('session').delete('master_crypto_key');
-          }
-        };
-      } catch (e) {
-        console.error("Erreur lors du nettoyage d'IndexedDB:", e);
-      }
+    if (this.storageDriver) {
+      await this.storageDriver.deleteMasterKey();
     }
-  }
-
-  private async persistToIndexedDB(keyData: Uint8Array): Promise<void> {
-    if (typeof indexedDB === 'undefined') return;
-
-    const cryptoKey = await crypto.subtle.importKey(
-      'raw',
-      keyData.buffer as ArrayBuffer,
-      { name: 'AES-GCM', length: 256 },
-      true,
-      ['encrypt', 'decrypt']
-    );
-
-    return new Promise((resolve, reject) => {
-      const request = indexedDB.open('AurionStorage', 1);
-      request.onupgradeneeded = (event: any) => {
-        const db = event.target.result;
-        if (!db.objectStoreNames.contains('session')) db.createObjectStore('session');
-      };
-      request.onsuccess = (event: any) => {
-        const db = event.target.result;
-        const transaction = db.transaction('session', 'readwrite');
-        const store = transaction.objectStore('session');
-        const putRequest = store.put(cryptoKey, 'master_crypto_key');
-        putRequest.onsuccess = () => resolve();
-        putRequest.onerror = () => reject(putRequest.error);
-      };
-      request.onerror = () => reject(request.error);
-    });
-  }
-
-  private readKeyFromIndexedDB(): Promise<CryptoKey | null> {
-    return new Promise((resolve, reject) => {
-      const request = indexedDB.open('AurionStorage', 1);
-      request.onupgradeneeded = (event: any) => {
-        const db = event.target.result;
-        if (!db.objectStoreNames.contains('session')) db.createObjectStore('session');
-      };
-      request.onsuccess = (event: any) => {
-        const db = event.target.result;
-        if (!db.objectStoreNames.contains('session')) { resolve(null); return; }
-        const transaction = db.transaction('session', 'readonly');
-        const getRequest = transaction.objectStore('session').get('master_crypto_key');
-        getRequest.onsuccess = () => resolve(getRequest.result || null);
-        getRequest.onerror = () => reject(getRequest.error);
-      };
-      request.onerror = () => reject(request.error);
-    });
   }
 
   public async encryptForRecipient(recipientKey: openpgp.PublicKey, plaintext: string): Promise<Base64CipherText> {
     return AurionCryptoService.encryptForRecipient(recipientKey, plaintext);
   }
 
-  // Permet de choisir l'identité émettrice pour chiffrer pour soi-même
   public async encryptForSelf(plaintext: string, identityEmail?: string): Promise<Base64CipherText> {
     return AurionCryptoService.encryptForSelf(this.getPrivateKeyForIdentity(identityEmail), plaintext);
   }
 
-  // Tente de déchiffrer avec une identité spécifique, sinon utilise la clé par défaut
   public async decryptCiphertext(ciphertext: Base64CipherText, identityEmail?: string): Promise<string> {
     return AurionCryptoService.decryptCiphertext(this.getPrivateKeyForIdentity(identityEmail), ciphertext);
   }
@@ -187,7 +135,7 @@ export class AurionSession {
   }
 
   public async processMailBatch(encryptedMails: Array<EncryptedMail>): Promise<Array<ProcessedMailTokens>> {
-    const privateKey = this.getPrivateKeyForIdentity(); // Utilise la clé par défaut pour l'indexation batch
+    const privateKey = this.getPrivateKeyForIdentity();
     const results: Array<ProcessedMailTokens> = [];
 
     for (const mail of encryptedMails) {
@@ -206,10 +154,6 @@ export class AurionSession {
     return results;
   }
 
-  /**
-   * 🔥 MODIFIÉ : Déchiffre en masse et indexe intelligemment TOUTES les identités chargées
-   * (Utile lors de l'appel à /keys/private/me ou via la liste extraite de /sync/routing)
-   */
   public async decryptAndLoadPrivateKeys(
     encryptedKeys: Array<{ encrypted_private_key: string; identity_email?: string }>,
     saltClient: string
@@ -221,23 +165,19 @@ export class AurionSession {
     const pgpPassphrase = AurionCryptoService.derivePgpPassphrase(this.h0, saltClient);
     const decryptedKeys = await AurionCryptoService.decryptPrivateKeys(encryptedKeys, pgpPassphrase);
 
-    // Indexation dans le multi-keyring local
     for (let i = 0; i < decryptedKeys.length; i++) {
       const key = decryptedKeys[i];
       const metadata = encryptedKeys[i];
 
-      // Si le serveur nous a fourni l'e-mail de l'identité lié à la clé, on l'indexe précisément
       if (metadata.identity_email) {
         this.identitiesKeyring.set(metadata.identity_email.toLowerCase(), key);
       } else {
-        // Fallback historique (OpenPGP userID)
         const userIds = key.getUserIDs();
         if (userIds.length > 0) {
           this.identitiesKeyring.set(userIds[0].toLowerCase(), key);
         }
       }
 
-      // La première clé reste définie comme la clé maîtresse/principale de session
       if (i === 0 && !this.pgpPrivateKey) {
         this.setPrimaryPrivateKey(key);
       }
@@ -246,10 +186,6 @@ export class AurionSession {
     return decryptedKeys;
   }
 
-  /**
-   * Permet d'injecter manuellement une clé déchiffrée isolée directement 
-   * dans le Keyring au cours du flux de traitement itératif de `/sync/routing`.
-   */
   public loadSingleDecryptedKey(email: string, privateKey: openpgp.PrivateKey): void {
     this.identitiesKeyring.set(email.toLowerCase(), privateKey);
     if (!this.pgpPrivateKey) {
@@ -271,11 +207,7 @@ export class AurionSession {
     const memberArmoredPublicKeys = members.map(m => m.public_key);
     const groupMaterial = await AurionCryptoService.generateGroupKeys(groupEmail, memberArmoredPublicKeys);
 
-    const parsedPrivateKey = await openpgp.readPrivateKey({ 
-      armoredKey: groupMaterial.groupPrivateKeyEncrypted 
-    });
-
-    const armoredGroupPublicKey = parsedPrivateKey.toPublic().armor();
+    const armoredGroupPublicKey = groupMaterial.groupPublicKeyArmored;
     const sharesPayload: Array<{ user_id: string; encrypted_private_key: string }> = [];
 
     for (const m of members) {

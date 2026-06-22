@@ -11,8 +11,9 @@ export interface ProcessedMailTokens {
 }
 
 export interface GroupKeyMaterial {
-  groupPrivateKeyEncrypted: string;
-  encryptedShares: Record<string, string>; // Record<PublicKeyFingerprint, EncryptedPrivateKeyBundle>
+  groupPrivateKeyEncrypted: string; // String (Armored)
+  groupPublicKeyArmored: string;    // String (Armored) - 🔑 Ajouté ici
+  encryptedShares: Record<string, string>;
 }
 
 export interface MailIndexDoc {
@@ -54,4 +55,16 @@ export interface GetEncryptedPrivateKeysResponse {
 
 export interface GetServerLoginResponse {
   server_password_encrypted: string;
+}
+
+export interface AurionStorageDriver {
+  // Pour la clé maîtresse volatile (CryptoKey binaire opaque)
+  readMasterKey(): Promise<CryptoKey | null>;
+  saveMasterKey(cryptoKey: CryptoKey): Promise<void>;
+  deleteMasterKey(): Promise<void>;
+
+  // 🔐 Pour les données génériques (ex: MailCredentials chiffrés, jetons, etc.)
+  getItem(key: string): Promise<string | null>;
+  setItem(key: string, value: string): Promise<void>;
+  removeItem(key: string): Promise<void>;
 }

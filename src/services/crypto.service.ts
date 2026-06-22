@@ -68,13 +68,13 @@ export function derivePgpPassphrase(h0: Uint8Array, saltClient: string): Uint8Ar
   return derivedBytes;
 }
 
-/** Génère une clé opaque WebCrypto asymétrique AES-GCM non exportable */
+/** Génère une clé opaque WebCrypto symétrique AES-GCM non exportable */
 export async function importWebCryptoKey(keyData: Uint8Array): Promise<CryptoKey> {
   return crypto.subtle.importKey(
     'raw',
     keyData.buffer as ArrayBuffer,
     { name: 'AES-GCM', length: 256 },
-    false, // Protection stricte : Impossible d'extraire la clé via JS après injection
+    false, // Protection stricte : clé non extractible en clair par JS
     ['encrypt', 'decrypt']
   );
 }
@@ -100,24 +100,45 @@ export async function decryptCiphertext(privateKey: openpgp.PrivateKey, cipherte
 }
 
 export async function generateGroupKeys(aliasEmail: string, memberPublicKeys: string[]): Promise<GroupKeyMaterial> {
-  const { privateKey } = await openpgp.generateKey({
+  // 1. Génération (Si votre version renvoie des strings directement)
+  const { privateKey, publicKey } = await openpgp.generateKey({
     type: 'ecc',
     userIDs: [{ name: aliasEmail, email: aliasEmail }],
   });
+
+  // 2. typage de sécurité : On force le traitement en string
+  const groupPrivateKeyEncrypted = privateKey as string;
+  let groupPublicKeyArmored = '';
+
+  // 3. Extraction propre de la clé publique sous forme de string
+  if (typeof publicKey === 'string') {
+    groupPublicKeyArmored = publicKey;
+  } else {
+    // Si publicKey était un objet, on l'armure de manière standard
+    const pubKeyObject = await openpgp.readKey({ armoredKey: privateKey as string });
+    groupPublicKeyArmored = pubKeyObject.toPublic().armor();
+  }
 
   const encryptedShares: Record<string, string> = {};
 
   for (const armoredPubKey of memberPublicKeys) {
     const memberKey = await openpgp.readKey({ armoredKey: armoredPubKey });
     const fingerprint = memberKey.getFingerprint();
+    
+    // On chiffre la clé privée (string) pour le membre
     const encryptedKeyBundle = await openpgp.encrypt({
-      message: await openpgp.createMessage({ text: privateKey }),
+      message: await openpgp.createMessage({ text: groupPrivateKeyEncrypted }),
       encryptionKeys: memberKey
     });
+    
     encryptedShares[fingerprint] = encryptedKeyBundle as string;
   }
 
-  return { groupPrivateKeyEncrypted: privateKey, encryptedShares };
+  return { 
+    groupPrivateKeyEncrypted, 
+    groupPublicKeyArmored, 
+    encryptedShares 
+  };
 }
 
 /** Déchiffre en masse une liste de clés privées OpenPGP */
