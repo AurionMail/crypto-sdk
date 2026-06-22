@@ -298,4 +298,14 @@ export class AurionSession {
       shares: sharesPayload
     };
   }
+
+  public async encryptMailCredentials(plaintext: string): Promise<string> {
+    if (!this.h0) throw new Error("Vault is locked. Call unlockVault first to generate h0.");
+    return AurionCryptoService.encryptMailCredentials(plaintext, this.h0);
+  }
+
+  public async decryptMailCredentials(combinedBase64: string): Promise<string> {
+    if (!this.h0) throw new Error("Vault is locked. Call unlockVault first to generate h0.");
+    return AurionCryptoService.decryptMailCredentials(combinedBase64, this.h0);
+  }
 }
