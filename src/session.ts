@@ -85,7 +85,7 @@ export class AurionSession {
     });
 
     if (this.storageDriver) {
-      await this.storageDriver.deleteMasterKey();
+      await this.storageDriver.clearAll();
     }
   }
 

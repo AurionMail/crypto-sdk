@@ -114,4 +114,20 @@ export class AurionIndexedDBDriver implements AurionStorageDriver {
       request.onerror = () => reject(request.error);
     });
   }
+  public async clearAll(): Promise<void> {
+    if (typeof indexedDB === 'undefined') return;
+    const db = await this.getDB();
+
+    return new Promise((resolve, reject) => {
+      const transaction = db.transaction(this.storeName, 'readwrite');
+      const store = transaction.objectStore(this.storeName);
+      const request = store.clear(); // 🧨 Vide l'intégralité du store (clés maîtresses, credentials parano, etc.)
+
+      request.onsuccess = () => {
+        db.close(); // Fermeture propre de la connexion après opération
+        resolve();
+      };
+      request.onerror = () => reject(request.error);
+    });
+  }
 }
