@@ -240,4 +240,7 @@ export class AurionSession {
     if (!this.h0) throw new Error("Vault is locked. Call unlockVault first to generate h0.");
     return AurionCryptoService.decryptMailCredentials(combinedBase64, this.h0);
   }
+  public isUnlocked(): boolean {
+    return this.h0 !== null;
+  }
 }
