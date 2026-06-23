@@ -243,4 +243,27 @@ export class AurionSession {
   public isUnlocked(): boolean {
     return this.h0 !== null;
   }
+
+  /**
+ * Exporte l'ensemble du trousseau sous forme textuelle (sérialisable) pour les Workers
+ */
+public exportArmoredKeyring(): Array<{ email: string; armoredKey: string }> {
+  const payload: Array<{ email: string; armoredKey: string }> = [];
+  
+  if (this.pgpPrivateKey) {
+    payload.push({
+      email: 'primary', // repère pour la clé primaire
+      armoredKey: this.pgpPrivateKey.armor()
+    });
+  }
+
+  for (const [email, privateKey] of this.identitiesKeyring.entries()) {
+    payload.push({
+      email,
+      armoredKey: privateKey.armor()
+    });
+  }
+
+  return payload;
+}
 }
