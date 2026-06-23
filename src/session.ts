@@ -31,7 +31,7 @@ export class AurionSession {
     this.pgpPrivateKey = privateKey;
   }
 
-  private getPrivateKeyForIdentity(email?: string): openpgp.PrivateKey {
+  public getPrivateKeyForIdentity(email?: string): openpgp.PrivateKey {
     if (email && this.identitiesKeyring.has(email.toLowerCase())) {
       return this.identitiesKeyring.get(email.toLowerCase())!;
     }
