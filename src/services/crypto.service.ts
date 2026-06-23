@@ -79,10 +79,26 @@ export async function importWebCryptoKey(keyData: Uint8Array): Promise<CryptoKey
   );
 }
 
-export async function encryptForRecipient(recipientKey: openpgp.PublicKey, plaintext: string): Promise<Base64CipherText> {
+// Dans ton fichier crypto service
+
+/**
+ * Chiffre un message pour un ou plusieurs destinataires (Multi-chiffrement PGP natif)
+ */
+export async function encryptForRecipients(
+  recipientKeys: openpgp.PublicKey | openpgp.PublicKey[], 
+  plaintext: string
+) {
   const message = await openpgp.createMessage({ text: plaintext });
-  const encrypted = await openpgp.encrypt({ message, encryptionKeys: recipientKey });
-  return toBase64(encrypted as string);
+  
+  // OpenPGP gère nativement les tableaux de clés sous encryptionKeys
+  const keys = Array.isArray(recipientKeys) ? recipientKeys : [recipientKeys];
+  
+  const encrypted = await openpgp.encrypt({ 
+    message, 
+    encryptionKeys: keys 
+  });
+  
+  return toBase64(encrypted);
 }
 
 export async function encryptForSelf(privateKey: openpgp.PrivateKey, plaintext: string): Promise<Base64CipherText> {

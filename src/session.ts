@@ -89,9 +89,12 @@ export class AurionSession {
     }
   }
 
-  public async encryptForRecipient(recipientKey: openpgp.PublicKey, plaintext: string): Promise<Base64CipherText> {
-    return AurionCryptoService.encryptForRecipient(recipientKey, plaintext);
-  }
+public async encryptForRecipients(
+  recipientKeys: openpgp.PublicKey | openpgp.PublicKey[], 
+  plaintext: string
+): Promise<Base64CipherText> {
+  return AurionCryptoService.encryptForRecipients(recipientKeys, plaintext);
+}
 
   public async encryptForSelf(plaintext: string, identityEmail?: string): Promise<Base64CipherText> {
     return AurionCryptoService.encryptForSelf(this.getPrivateKeyForIdentity(identityEmail), plaintext);
