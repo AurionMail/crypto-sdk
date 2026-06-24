@@ -116,42 +116,39 @@ export async function decryptCiphertext(privateKey: openpgp.PrivateKey, cipherte
 }
 
 export async function generateGroupKeys(aliasEmail: string, memberPublicKeys: string[]): Promise<GroupKeyMaterial> {
-  // 1. Génération (Si votre version renvoie des strings directement)
+  // 1. Spécification explicite du format 'armored' pour garantir le retour de types string
   const { privateKey, publicKey } = await openpgp.generateKey({
-    type: 'ecc',
+    type: 'ecc', // Utilise par défaut Curve 25519 (Ed25519/X25519)
     userIDs: [{ name: aliasEmail, email: aliasEmail }],
+    format: 'armored' // Crucial : force le type de retour à string
   });
 
-  // 2. typage de sécurité : On force le traitement en string
-  const groupPrivateKeyEncrypted = privateKey as string;
-  let groupPublicKeyArmored = '';
-
-  // 3. Extraction propre de la clé publique sous forme de string
-  if (typeof publicKey === 'string') {
-    groupPublicKeyArmored = publicKey;
-  } else {
-    // Si publicKey était un objet, on l'armure de manière standard
-    const pubKeyObject = await openpgp.readKey({ armoredKey: privateKey as string });
-    groupPublicKeyArmored = pubKeyObject.toPublic().armor();
-  }
+  // Grâce au format 'armored', privateKey et publicKey sont garantis de type string
+  const groupPrivateKeyArmored = privateKey;
+  const groupPublicKeyArmored = publicKey;
 
   const encryptedShares: Record<string, string> = {};
 
+  // 2. Traitement des clés des membres
   for (const armoredPubKey of memberPublicKeys) {
     const memberKey = await openpgp.readKey({ armoredKey: armoredPubKey });
     const fingerprint = memberKey.getFingerprint();
     
-    // On chiffre la clé privée (string) pour le membre
+    // On prépare le message contenant la clé privée du groupe (string)
+    const message = await openpgp.createMessage({ text: groupPrivateKeyArmored });
+    
+    // Chiffrement pour le membre courant
     const encryptedKeyBundle = await openpgp.encrypt({
-      message: await openpgp.createMessage({ text: groupPrivateKeyEncrypted }),
+      message,
       encryptionKeys: memberKey
     });
     
+    // OpenPGP retourne un string au format armored par défaut si le message initial était du texte
     encryptedShares[fingerprint] = encryptedKeyBundle as string;
   }
 
   return { 
-    groupPrivateKeyEncrypted, 
+    groupPrivateKeyEncrypted: groupPrivateKeyArmored, // Renommé par cohérence avec votre type
     groupPublicKeyArmored, 
     encryptedShares 
   };

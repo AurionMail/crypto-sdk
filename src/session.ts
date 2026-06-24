@@ -1,6 +1,6 @@
 import * as openpgp from 'openpgp';
 import * as AurionCryptoService from './services/crypto.service.js';
-import { SecurityMode, EncryptedMail, ProcessedMailTokens, GroupKeyMaterial, MailIndexDoc, Base64CipherText, AurionStorageDriver } from './types.js';
+import { SecurityMode, EncryptedMail, ProcessedMailTokens, GroupKeyMaterial, Base64CipherText, AurionStorageDriver } from './types.js';
 import { AurionSearch } from './search.js';
 
 export class AurionSession {
@@ -34,6 +34,7 @@ export class AurionSession {
 
   /**
    * Restauration via le driver abstrait
+   * Remplit this.h0 de manière Zero-Knowledge et sécurisée contre les XSS
    */
   public async tryAutoUnlock(): Promise<boolean> {
     if (!this.storageDriver){ 
@@ -41,15 +42,34 @@ export class AurionSession {
       return false;}
 
     try {
-      const cryptoKey = await this.storageDriver.readMasterKey();
-      if (!cryptoKey){ 
+      // 1. Récupération de la clé opaque non extractible et du blob chiffré
+      const storageKey = await this.storageDriver.readMasterKey();
+      const encryptedPayload = await this.storageDriver.getEncryptedH0();
+
+      if (!storageKey || !encryptedPayload) { 
         this.mode = 'Parano';
         return false;
       }
 
-      const rawBuffer = await crypto.subtle.exportKey('raw', cryptoKey);
-      this.h0 = new Uint8Array(rawBuffer);
+      // 2. Extraction de l'IV (12 premiers octets) et du ciphertext
+      if (encryptedPayload.length < 12) throw new Error("Payload h0 corrompu");
+      const iv = encryptedPayload.slice(0, 12);
+      const ciphertext = encryptedPayload.slice(12);
+
+      // 3. Déchiffrement interne par l'API WebCrypto
+      const decryptedBuffer = await crypto.subtle.decrypt(
+        { name: 'AES-GCM', iv },
+        storageKey,
+        ciphertext
+      );
+
+      // 4. Initialisation sécurisée de h0 en RAM
+      this.h0 = new Uint8Array(decryptedBuffer);
       this.mode = 'Confort';
+
+      // 5. Restauration automatique de l'index de recherche
+      await this.loadSearchIndexFromStorage();
+
       return true;
     } catch (error) {
       console.warn("Échec de la reconnexion automatique via le storage driver:", error);
@@ -63,14 +83,36 @@ export class AurionSession {
     this.mode = mode;
 
     if (this.mode === 'Confort' && this.storageDriver) {
-      const cryptoKey = await crypto.subtle.importKey(
-        'raw',
-        this.h0.buffer as ArrayBuffer,
-        { name: 'AES-GCM', length: 256 },
-        true, // Nécessaire pour tryAutoUnlock via exportKey('raw')
-        ['encrypt', 'decrypt']
-      );
-      await this.storageDriver.saveMasterKey(cryptoKey);
+      try {
+        // 1. Génération d'une clé AES-GCM locale NON EXTRACTIBLE (extractable: false)
+        const storageKey = await crypto.subtle.generateKey(
+          { name: 'AES-GCM', length: 256 },
+          false,
+          ['encrypt', 'decrypt']
+        );
+
+        // 2. Chiffrement de h0 avec cette clé locale
+        const iv = crypto.getRandomValues(new Uint8Array(12));
+        const encryptedBuffer = await crypto.subtle.encrypt(
+          { name: 'AES-GCM', iv },
+          storageKey,
+          this.h0.buffer as ArrayBuffer
+        );
+
+        // 3. Assemblage [IV + Ciphertext]
+        const combined = new Uint8Array(iv.length + encryptedBuffer.byteLength);
+        combined.set(iv, 0);
+        combined.set(new Uint8Array(encryptedBuffer), iv.length);
+
+        // 4. Persistance séparée (la clé opaque d'un côté, les données de l'autre)
+        await this.storageDriver.saveMasterKey(storageKey);
+        await this.storageDriver.saveEncryptedH0(combined);
+
+      } catch (error) {
+        console.error("Impossible de sécuriser la session en mode Confort:", error);
+        // Fallback de sécurité en mode Parano si l'API WebCrypto échoue localement
+        this.mode = 'Parano';
+      }
     }
 
     // Restauration automatique de l'index de recherche si disponible (Modes Confort et Parano)
@@ -147,6 +189,7 @@ public async encryptForRecipients(
         clearTextBody = null;
       }
     }
+    await this.saveSearchIndexToStorage();
     return results;
   }
 

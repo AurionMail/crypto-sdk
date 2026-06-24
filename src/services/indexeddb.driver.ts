@@ -32,12 +32,10 @@ export class AurionIndexedDBDriver implements AurionStorageDriver {
   public async readMasterKey(): Promise<CryptoKey | null> {
     if (typeof indexedDB === 'undefined') return null;
     const db = await this.getDB();
-
     return new Promise((resolve, reject) => {
       const transaction = db.transaction(this.storeName, 'readonly');
       const store = transaction.objectStore(this.storeName);
-      const request = store.get(this.keyName);
-
+      const request = store.get(this.keyName); // 'master_crypto_key'
       request.onsuccess = () => resolve(request.result || null);
       request.onerror = () => reject(request.error);
     });
@@ -46,11 +44,35 @@ export class AurionIndexedDBDriver implements AurionStorageDriver {
   public async saveMasterKey(cryptoKey: CryptoKey): Promise<void> {
     if (typeof indexedDB === 'undefined') return;
     const db = await this.getDB();
-
     return new Promise((resolve, reject) => {
       const transaction = db.transaction(this.storeName, 'readwrite');
       const store = transaction.objectStore(this.storeName);
       const request = store.put(cryptoKey, this.keyName);
+      request.onsuccess = () => resolve();
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  public async getEncryptedH0(): Promise<Uint8Array | null> {
+    if (typeof indexedDB === 'undefined') return null;
+    const db = await this.getDB();
+    return new Promise((resolve, reject) => {
+      const transaction = db.transaction(this.storeName, 'readonly');
+      const store = transaction.objectStore(this.storeName);
+      const request = store.get('encrypted_h0_payload');
+
+      request.onsuccess = () => resolve(request.result || null);
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  public async saveEncryptedH0(payload: Uint8Array): Promise<void> {
+    if (typeof indexedDB === 'undefined') return;
+    const db = await this.getDB();
+    return new Promise((resolve, reject) => {
+      const transaction = db.transaction(this.storeName, 'readwrite');
+      const store = transaction.objectStore(this.storeName);
+      const request = store.put(payload, 'encrypted_h0_payload');
 
       request.onsuccess = () => resolve();
       request.onerror = () => reject(request.error);

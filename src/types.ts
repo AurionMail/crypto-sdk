@@ -63,6 +63,8 @@ export interface AurionStorageDriver {
   readMasterKey(): Promise<CryptoKey | null>;
   saveMasterKey(cryptoKey: CryptoKey): Promise<void>;
   deleteMasterKey(): Promise<void>;
+  getEncryptedH0(): Promise<Uint8Array | null>;
+  saveEncryptedH0(encryptedH0: Uint8Array): Promise<void>;
 
   // 🔐 Pour les données génériques (ex: MailCredentials chiffrés, jetons, etc.)
   getItem(key: string): Promise<string | null>;
