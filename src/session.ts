@@ -1,30 +1,23 @@
 import * as openpgp from 'openpgp';
-import MiniSearch from 'minisearch';
 import * as AurionCryptoService from './services/crypto.service.js';
 import { SecurityMode, EncryptedMail, ProcessedMailTokens, GroupKeyMaterial, MailIndexDoc, Base64CipherText, AurionStorageDriver } from './types.js';
+import { AurionSearch } from './search.js';
 
 export class AurionSession {
   public h0: Uint8Array | null = null;
   private pgpPrivateKey: openpgp.PrivateKey | null = null;
   private identitiesKeyring: Map<string, openpgp.PrivateKey> = new Map();
-  private searchIndex: MiniSearch<MailIndexDoc>;
   private mode: SecurityMode | null = null;
   private storageDriver: AurionStorageDriver | null = null; // Injection du driver alternatif
 
-  private static readonly STOP_WORDS = new Set([
-    'le', 'la', 'les', 'de', 'des', 'un', 'une', 'et', 'en', 'du', 'au', 'aux', 'pour', 'dans', 'par', 'sur', 'qui', 'que', 'quoi', 'ce', 'cette',
-    'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'is', 'it', 'this', 'that'
-  ]);
+  public searchEngine: AurionSearch;
 
   /**
    * Le constructeur accepte un driver de stockage optionnel pour découpler la persistance
    */
   constructor(storageDriver: AurionStorageDriver | null = null) {
     this.storageDriver = storageDriver;
-    this.searchIndex = new MiniSearch<MailIndexDoc>({
-      fields: ['text'],
-      storeFields: ['id']
-    });
+    this.searchEngine = new AurionSearch();
   }
 
   public setPrimaryPrivateKey(privateKey: openpgp.PrivateKey): void {
@@ -43,11 +36,16 @@ export class AurionSession {
    * Restauration via le driver abstrait
    */
   public async tryAutoUnlock(): Promise<boolean> {
-    if (!this.storageDriver) return false;
+    if (!this.storageDriver){ 
+      this.mode = 'Parano';
+      return false;}
 
     try {
       const cryptoKey = await this.storageDriver.readMasterKey();
-      if (!cryptoKey) return false;
+      if (!cryptoKey){ 
+        this.mode = 'Parano';
+        return false;
+      }
 
       const rawBuffer = await crypto.subtle.exportKey('raw', cryptoKey);
       this.h0 = new Uint8Array(rawBuffer);
@@ -55,13 +53,15 @@ export class AurionSession {
       return true;
     } catch (error) {
       console.warn("Échec de la reconnexion automatique via le storage driver:", error);
+      this.mode = 'Parano';
       return false;
     }
   }
 
-  public async unlockVault(password: string): Promise<void> {
+  public async unlockVault(password: string, mode: SecurityMode = 'Confort'): Promise<void> {
     this.h0 = AurionCryptoService.calculateH0(password);
-    
+    this.mode = mode;
+
     if (this.mode === 'Confort' && this.storageDriver) {
       const cryptoKey = await crypto.subtle.importKey(
         'raw',
@@ -71,7 +71,12 @@ export class AurionSession {
         ['encrypt', 'decrypt']
       );
       await this.storageDriver.saveMasterKey(cryptoKey);
-    } 
+    }
+
+    // Restauration automatique de l'index de recherche si disponible (Modes Confort et Parano)
+    if (this.mode !== 'Extreme') {
+      await this.loadSearchIndexFromStorage();
+    }
   }
 
   public async clearSession(): Promise<void> {
@@ -79,10 +84,7 @@ export class AurionSession {
     this.pgpPrivateKey = null;
     this.identitiesKeyring.clear();
     this.mode = null;
-    this.searchIndex = new MiniSearch<MailIndexDoc>({
-      fields: ['text'],
-      storeFields: ['id']
-    });
+    this.searchEngine.clear();
 
     if (this.storageDriver) {
       await this.storageDriver.clearAll();
@@ -117,24 +119,11 @@ public async encryptForRecipients(
   }
 
   public extractSearchTokens(clearTextBody: string): string[] {
-    const cleanHtml = clearTextBody
-      .replace(/<style([\s\S]*?)<\/style>/gi, '')
-      .replace(/<script([\s\S]*?)<\/script>/gi, '')
-      .replace(/<[^>]+>/g, ' ');
-
-    const normalized = cleanHtml.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-    const words = normalized.match(/\b[\w\d_-]+\b/g) || [];
-
-    const uniqueTokens = new Set<string>();
-    for (const word of words) {
-      if (word.length > 1 && !AurionSession.STOP_WORDS.has(word)) uniqueTokens.add(word);
-    }
-    return Array.from(uniqueTokens);
+    return this.searchEngine.extractSearchTokens(clearTextBody);
   }
 
-  public async search(query: string): Promise<string[]> {
-    const normalizedQuery = query.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-    return this.searchIndex.search(normalizedQuery).map(res => res.id);
+  public async search(query: string, mailboxId?: string): Promise<string[]> {
+    return this.searchEngine.search(query, mailboxId);
   }
 
   public async processMailBatch(encryptedMails: Array<EncryptedMail>): Promise<Array<ProcessedMailTokens>> {
@@ -145,9 +134,13 @@ public async encryptForRecipients(
       let clearTextBody: string | null = null;
       try {
         clearTextBody = await AurionCryptoService.decryptCiphertext(privateKey, mail.body);
-        const tokens = this.extractSearchTokens(clearTextBody);
         
-        this.searchIndex.add({ id: mail.id, text: tokens.join(' ') });
+        // Extraction et indexation via le searchEngine dédié
+        // Note : s'assurer de passer les mailboxIds si disponibles, sinon tableau vide par défaut
+        const mailboxIds = mail.mailboxIds || []; 
+        this.searchEngine.indexMail(mail.id, mailboxIds, clearTextBody);
+        
+        const tokens = this.searchEngine.extractSearchTokens(clearTextBody);
         results.push({ id: mail.id, tokens });
       } finally {
         if (clearTextBody) clearTextBody = "";
@@ -236,12 +229,12 @@ public async encryptForRecipients(
 
   public async encryptMailCredentials(plaintext: string): Promise<string> {
     if (!this.h0) throw new Error("Vault is locked. Call unlockVault first to generate h0.");
-    return AurionCryptoService.encryptMailCredentials(plaintext, this.h0);
+    return AurionCryptoService.encryptWithH0(plaintext, this.h0);
   }
 
   public async decryptMailCredentials(combinedBase64: string): Promise<string> {
     if (!this.h0) throw new Error("Vault is locked. Call unlockVault first to generate h0.");
-    return AurionCryptoService.decryptMailCredentials(combinedBase64, this.h0);
+    return AurionCryptoService.decryptWithH0(combinedBase64, this.h0);
   }
   public isUnlocked(): boolean {
     return this.h0 !== null;
@@ -269,4 +262,60 @@ public exportArmoredKeyring(): Array<{ email: string; armoredKey: string }> {
 
   return payload;
 }
+
+// session.ts
+
+  /**
+   * Chiffre et persiste l'index de recherche MiniSearch actuel dans IndexedDB
+   * Ne fait rien si le mode est 'Extreme' ou si aucun driver n'est présent.
+   */
+  public async saveSearchIndexToStorage(): Promise<void> {
+    if (!this.storageDriver) return;
+    if (this.mode === 'Extreme') {
+      console.log('[SearchIndex] Persistance ignorée (Mode de sécurité : Extreme)');
+      return;
+    }
+    if (!this.h0) throw new Error("Vault is locked. Cannot encrypt index without h0.");
+
+    try {
+      const jsonIndex = this.searchEngine.exportJSON();
+      const serialized = JSON.stringify(jsonIndex);
+      
+      // Chiffrement symétrique avec h0 pour garantir le Zero-Knowledge local
+      const encryptedIndex = await AurionCryptoService.encryptWithH0(serialized, this.h0);
+      
+      await this.storageDriver.setItem('local_search_index', encryptedIndex);
+      console.log('[SearchIndex] Index local chiffré et sauvegardé avec succès.');
+    } catch (error) {
+      console.error('[SearchIndex] Échec de la sauvegarde de l\'index local :', error);
+    }
+  }
+
+  /**
+   * Récupère, déchiffre et charge l'index de recherche MiniSearch depuis IndexedDB
+   */
+  public async loadSearchIndexFromStorage(): Promise<boolean> {
+    if (!this.storageDriver) return false;
+    if (this.mode === 'Extreme') return false;
+    if (!this.h0) throw new Error("Vault is locked. Cannot decrypt index without h0.");
+
+    try {
+      const encryptedIndex = await this.storageDriver.getItem('local_search_index');
+      if (!encryptedIndex) {
+        console.log('[SearchIndex] Aucun index local trouvé dans le stockage.');
+        return false;
+      }
+
+      // Déchiffrement avec h0
+      const serialized = await AurionCryptoService.decryptWithH0(encryptedIndex, this.h0);
+      const jsonIndex = JSON.parse(serialized);
+      
+      this.searchEngine.importJSON(jsonIndex);
+      console.log('[SearchIndex] Index local restauré en RAM avec succès.');
+      return true;
+    } catch (error) {
+      console.warn('[SearchIndex] Échec du chargement ou du déchiffrement de l\'index local :', error);
+      return false;
+    }
+  }
 }

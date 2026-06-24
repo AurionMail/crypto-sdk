@@ -179,56 +179,66 @@ export async function decryptPrivateKeys(
 
   return decryptedKeys;
 }
-
 /**
- * Chiffre les identifiants mail en utilisant la clé h0.
+ * Chiffre symétriquement une chaîne de caractères avec la clé maîtresse h0 (AES-GCM 256).
  * Retourne une chaîne Base64 contenant [IV (12 octets) + Ciphertext].
  */
-export async function encryptMailCredentials(plaintext: string, h0: Uint8Array): Promise<string> {
-  const cryptoKey = await importWebCryptoKey(h0);
+export async function encryptWithH0(plaintext: string, h0: Uint8Array): Promise<string> {
+  const cryptoKey = await crypto.subtle.importKey(
+    'raw',
+    h0.buffer as ArrayBuffer,
+    { name: 'AES-GCM', length: 256 },
+    false,
+    ['encrypt']
+  );
 
-  const iv = new Uint8Array(12);
-  crypto.getRandomValues(iv);
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const encoded = new TextEncoder().encode(plaintext);
+  const encryptedBuffer = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, cryptoKey, encoded);
 
-  const plaintextBytes = utf8Encode(plaintext);
-  const encryptedBuffer = await crypto.subtle.encrypt(
-  { name: 'AES-GCM', iv },
-  cryptoKey,
-  plaintextBytes.buffer as ArrayBuffer // Cast direct du buffer propre
-);
+  const combined = new Uint8Array(iv.length + encryptedBuffer.byteLength);
+  combined.set(iv, 0);
+  combined.set(new Uint8Array(encryptedBuffer), iv.length);
 
-  const encryptedBytes = new Uint8Array(encryptedBuffer);
-
-  const combinedBytes = new Uint8Array(iv.length + encryptedBytes.length);
-  combinedBytes.set(iv, 0);
-  combinedBytes.set(encryptedBytes, iv.length);
-
-  const binaryString = Array.from(combinedBytes, (byte) => String.fromCharCode(byte)).join('');
+  // Conversion performante binaire -> Base64 (évite l'allocation massive de tableaux de chaînes)
+  let binaryString = '';
+  for (let i = 0; i < combined.length; i++) {
+    binaryString += String.fromCharCode(combined[i]);
+  }
   return btoa(binaryString);
 }
 
 /**
- * Déchiffre les identifiants mail à partir de la chaîne Base64 générée par encryptMailCredentials.
+ * Déchiffre symétriquement une chaîne Base64 avec la clé maîtresse h0 (AES-GCM 256).
  */
-export async function decryptMailCredentials(combinedBase64: string, h0: Uint8Array): Promise<string> {
-  const cryptoKey = await importWebCryptoKey(h0);
+export async function decryptWithH0(combinedBase64: string, h0: Uint8Array): Promise<string> {
+  const cryptoKey = await crypto.subtle.importKey(
+    'raw',
+    h0.buffer as ArrayBuffer,
+    { name: 'AES-GCM', length: 256 },
+    false,
+    ['decrypt']
+  );
 
   const binaryString = atob(combinedBase64);
-  const combinedBytes = Uint8Array.from(binaryString, (char) => char.charCodeAt(0));
+  const combined = new Uint8Array(binaryString.length);
+  for (let i = 0; i < binaryString.length; i++) {
+    combined[i] = binaryString.charCodeAt(i);
+  }
 
-  const iv = combinedBytes.slice(0, 12);
-  const ciphertextBytes = combinedBytes.slice(12);
-
-  if (iv.length < 12) {
+  if (combined.length < 12) {
     throw new Error('Données chiffrées invalides ou corrompues (IV manquant)');
   }
 
+  const iv = combined.slice(0, 12);
+  const ciphertext = combined.slice(12);
 
-const decryptedBuffer = await crypto.subtle.decrypt(
-  { name: 'AES-GCM', iv: iv.buffer as ArrayBuffer }, // IV isolé
-  cryptoKey,
-  ciphertextBytes.buffer as ArrayBuffer
-);
+  // Utilisation sécurisée et directe des Uint8Arrays (évite les bugs liés au partage d'ArrayBuffer)
+  const decryptedBuffer = await crypto.subtle.decrypt(
+    { name: 'AES-GCM', iv },
+    cryptoKey,
+    ciphertext
+  );
 
-  return utf8Decode(new Uint8Array(decryptedBuffer));
+  return new TextDecoder().decode(decryptedBuffer);
 }

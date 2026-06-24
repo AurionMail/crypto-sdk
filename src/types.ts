@@ -3,6 +3,7 @@ export type SecurityMode = 'Confort' | 'Parano' | 'Extreme';
 export interface EncryptedMail {
   id: string;
   body: string; // Bloc de données chiffré par OpenPGP
+  mailboxIds?: string[]; // Liste des IDs de dossiers (ex: ["inbox", "sent"])
 }
 
 export interface ProcessedMailTokens {
@@ -12,17 +13,17 @@ export interface ProcessedMailTokens {
 
 export interface GroupKeyMaterial {
   groupPrivateKeyEncrypted: string; // String (Armored)
-  groupPublicKeyArmored: string;    // String (Armored) - 🔑 Ajouté ici
+  groupPublicKeyArmored: string;    // String (Armored)
   encryptedShares: Record<string, string>;
 }
 
 export interface MailIndexDoc {
   id: string;
+  mailboxIds: string[];        // Liste des IDs de dossiers (ex: ["inbox", "sent"])
   text: string;
 }
 export type Base64CipherText = string;
 
-// ... (Conserver vos types précédents)
 
 export interface NetworkConfig {
   apiBase: string;
