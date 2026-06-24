@@ -99,4 +99,7 @@ export class AurionSearch {
       storeFields: ['id', 'mailboxIds']
     });
   }
+  public hasDocument(id: string): boolean {
+    return this.searchIndex.has(id);
+  }
 }
