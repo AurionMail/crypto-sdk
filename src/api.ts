@@ -5,7 +5,8 @@ import {
   SaltResponse, 
   PublicKeyResponse, 
   GetEncryptedPrivateKeysResponse,
-  GetServerLoginResponse
+  GetServerLoginResponse,
+  SyncRoutingResponse
 } from './types.js';
 
 export class AurionApiClient {
@@ -190,7 +191,7 @@ public async verifyMailServer(email: string, serverPassword: string): Promise<{ 
 }
 
 
-public async syncRouting(): Promise<any> {
+public async syncRouting(): Promise<SyncRoutingResponse> {
   if (!this.token) throw new Error('Not authenticated');
 
   const res = await fetch(`${this.apiBase}/sync/routing`, {
@@ -198,7 +199,7 @@ public async syncRouting(): Promise<any> {
   });
 
   if (!res.ok) throw new Error('Failed to fetch routing sync state');
-  return res.json();
+  return res.json() as Promise<SyncRoutingResponse>;
 }
 
 

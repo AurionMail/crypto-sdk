@@ -72,3 +72,35 @@ export interface AurionStorageDriver {
   removeItem(key: string): Promise<void>;
   clearAll(): Promise<void>;
 }
+
+export interface MemberKeyInfo {
+  user_id: string;
+  public_key: string; // Bloc de clé publique armored du membre
+}
+
+export interface RoutingSyncItem {
+  identity_id: string;
+  email: string;
+  type: 'primary' | 'alias' | 'shared'; // primary = personnel, alias = alias, shared = groupe/partagé
+  needs_key_gen: boolean;
+  needs_key_fetch: boolean;
+  encrypted_private_key?: string; // base64 blob si disponible
+  wkd_hash?: string;
+  members?: MemberKeyInfo[]; // Présent si needs_key_gen est true
+}
+
+export interface SyncRoutingResponse {
+  identities: RoutingSyncItem[];
+}
+
+export interface KeySharePayload {
+  user_id: string;
+  encrypted_private_key: string; // Clé partagée chiffrée avec la clé publique du membre
+}
+
+export interface KeyUploadPayload {
+  identity_id: string;
+  armored_public_key: string;
+  wkd_hash: string;
+  shares: KeySharePayload[];
+}
