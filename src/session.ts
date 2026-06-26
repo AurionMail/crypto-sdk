@@ -348,4 +348,32 @@ public exportArmoredKeyring(): Array<{ email: string; armoredKey: string }> {
       return false;
     }
   }
+
+  /**
+ * Orchestre la génération des clés de l'utilisateur lors de son premier onboarding.
+ * * @param userEmail L'adresse e-mail de l'utilisateur qui s'enregistre
+ */
+public async generateOnboardingKeys(userEmail: string): Promise<{
+  publicKeyArmored: string;
+  privateKeyArmored: string;
+}> {
+  if (!userEmail || !userEmail.includes('@')) {
+    throw new Error("[Session] L'adresse e-mail fournie pour l'onboarding est invalide.");
+  }
+
+  try {
+    // Appel direct au service cryptographique du SDK
+    const primaryKeyPair = await AurionCryptoService.generatePrimaryKeyPair(userEmail);
+
+    return {
+      publicKeyArmored: primaryKeyPair.publicKeyArmored,
+      // Cette clé privée en clair sera récupérée en RAM par l'app d'onboarding
+      // pour être chiffrée ensuite avec le mot de passe + salt
+      privateKeyArmored: primaryKeyPair.privateKeyArmored
+    };
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    throw new Error(`[Session] Échec de la préparation des clés d'onboarding : ${msg}`);
+  }
+}
 }

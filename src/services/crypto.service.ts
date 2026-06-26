@@ -236,3 +236,28 @@ export async function decryptWithH0(combinedBase64: string, h0: Uint8Array): Pro
 
   return new TextDecoder().decode(decryptedBuffer);
 }
+
+/**
+ * Génère une paire de clés OpenPGP (ECC) neuve pour l'onboarding initial.
+ * Renvoie la clé publique et la clé privée en clair (armored).
+ */
+export async function generatePrimaryKeyPair(userEmail: string): Promise<{
+  publicKeyArmored: string;
+  privateKeyArmored: string;
+}> {
+  try {
+    const { privateKey, publicKey } = await openpgp.generateKey({
+      type: 'ecc',
+      userIDs: [{ name: userEmail, email: userEmail }],
+      format: 'armored'
+    });
+
+    return {
+      publicKeyArmored: publicKey,
+      privateKeyArmored: privateKey
+    };
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    throw new Error(`[CryptoSDK] Erreur génération paire de clés primaires : ${msg}`);
+  }
+}
