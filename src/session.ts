@@ -232,31 +232,6 @@ public async encryptForRecipients(
     }
   }
 
-  public async syncGroupKeys(
-    identityId: string,
-    groupEmail: string,
-    wkdHash: string,
-    members: Array<{ user_id: string; public_key: string }>
-  ): Promise<{
-    identity_id: string;
-    armored_public_key: string;
-    wkd_hash: string;
-    shares: Array<{ user_id: string; encrypted_private_key: string }>;
-  }> {
-    // 1. On passe directement le tableau de membres (GroupMemberInput[]) au service, 
-    // plus besoin de faire un .map(m => m.public_key)
-    const groupMaterial = await AurionCryptoService.generateGroupKeys(groupEmail, members);
-
-    // 2. Le service renvoie déjà les shares mappés par user_id avec le Base64 appliqué.
-    // On a juste à reconstruire le payload pour l'API Go.
-    return {
-      identity_id: identityId,
-      armored_public_key: groupMaterial.groupPublicKeyArmored,
-      wkd_hash: wkdHash,
-      shares: groupMaterial.shares
-    };
-  }
-
   public async encryptMailCredentials(plaintext: string): Promise<string> {
     if (!this.h0) throw new Error("Vault is locked. Call unlockVault first to generate h0.");
     return AurionCryptoService.encryptWithH0(plaintext, this.h0);
@@ -292,8 +267,6 @@ public exportArmoredKeyring(): Array<{ email: string; armoredKey: string }> {
 
   return payload;
 }
-
-// session.ts
 
   /**
    * Chiffre et persiste l'index de recherche MiniSearch actuel dans IndexedDB

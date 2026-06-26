@@ -96,7 +96,6 @@ export interface KeySharePayload {
 export interface KeyUploadPayload {
   identity_id: string;
   armored_public_key: string;
-  wkd_hash: string;
   shares: KeySharePayload[];
 }
 
