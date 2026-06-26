@@ -206,7 +206,6 @@ public async syncRouting(): Promise<SyncRoutingResponse> {
 public async uploadSynchronizedKeys(payload: {
   identity_id: string;
   armored_public_key: string;
-  wkd_hash: string;
   shares: Array<{ user_id: string; encrypted_private_key: string }>;
 }): Promise<void> {
   if (!this.token) throw new Error('Not authenticated');

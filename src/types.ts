@@ -11,11 +11,6 @@ export interface ProcessedMailTokens {
   tokens: string[];
 }
 
-export interface GroupKeyMaterial {
-  groupPrivateKeyEncrypted: string; // String (Armored)
-  groupPublicKeyArmored: string;    // String (Armored)
-  encryptedShares: Record<string, string>;
-}
 
 export interface MailIndexDoc {
   id: string;
@@ -102,5 +97,15 @@ export interface KeyUploadPayload {
   identity_id: string;
   armored_public_key: string;
   wkd_hash: string;
+  shares: KeySharePayload[];
+}
+
+export interface GroupMemberInput {
+  user_id: string;
+  public_key: string;
+}
+
+export interface GroupKeyMaterial {
+  groupPublicKeyArmored: string;
   shares: KeySharePayload[];
 }

@@ -1,6 +1,6 @@
 import * as openpgp from 'openpgp';
 import { argon2id as nobleArgon2id } from '@noble/hashes/argon2.js';
-import { Base64CipherText, GroupKeyMaterial } from '../types.js';
+import { Base64CipherText, GroupKeyMaterial, GroupMemberInput } from '../types.js';
 
 const ARGON2_CONFIG = {
   t: 3,           // Time cost
@@ -115,42 +115,39 @@ export async function decryptCiphertext(privateKey: openpgp.PrivateKey, cipherte
   return data as string;
 }
 
-export async function generateGroupKeys(aliasEmail: string, memberPublicKeys: string[]): Promise<GroupKeyMaterial> {
-  // 1. Spécification explicite du format 'armored' pour garantir le retour de types string
+// Nouvelle version ou wrapper de la fonction du SDK
+export async function generateGroupKeys(
+  aliasEmail: string, 
+  members: GroupMemberInput[]
+): Promise<GroupKeyMaterial> {
+  
   const { privateKey, publicKey } = await openpgp.generateKey({
-    type: 'ecc', // Utilise par défaut Curve 25519 (Ed25519/X25519)
+    type: 'ecc',
     userIDs: [{ name: aliasEmail, email: aliasEmail }],
-    format: 'armored' // Crucial : force le type de retour à string
+    format: 'armored'
   });
 
-  // Grâce au format 'armored', privateKey et publicKey sont garantis de type string
-  const groupPrivateKeyArmored = privateKey;
-  const groupPublicKeyArmored = publicKey;
+  const shares = [];
 
-  const encryptedShares: Record<string, string> = {};
-
-  // 2. Traitement des clés des membres
-  for (const armoredPubKey of memberPublicKeys) {
-    const memberKey = await openpgp.readKey({ armoredKey: armoredPubKey });
-    const fingerprint = memberKey.getFingerprint();
+  for (const member of members) {
+    const memberKey = await openpgp.readKey({ armoredKey: member.public_key });
+    const message = await openpgp.createMessage({ text: privateKey });
     
-    // On prépare le message contenant la clé privée du groupe (string)
-    const message = await openpgp.createMessage({ text: groupPrivateKeyArmored });
-    
-    // Chiffrement pour le membre courant
     const encryptedKeyBundle = await openpgp.encrypt({
       message,
       encryptionKeys: memberKey
     });
     
-    // OpenPGP retourne un string au format armored par défaut si le message initial était du texte
-    encryptedShares[fingerprint] = encryptedKeyBundle as string;
+    shares.push({
+      user_id: member.user_id,
+      // Le btoa (Base64) est appliqué ici
+      encrypted_private_key: btoa(encryptedKeyBundle as string) 
+    });
   }
 
-  return { 
-    groupPrivateKeyEncrypted: groupPrivateKeyArmored, // Renommé par cohérence avec votre type
-    groupPublicKeyArmored, 
-    encryptedShares 
+  return {
+    groupPublicKeyArmored: publicKey,
+    shares
   };
 }
 

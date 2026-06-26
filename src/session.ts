@@ -1,6 +1,6 @@
 import * as openpgp from 'openpgp';
 import * as AurionCryptoService from './services/crypto.service.js';
-import { SecurityMode, EncryptedMail, ProcessedMailTokens, GroupKeyMaterial, Base64CipherText, AurionStorageDriver } from './types.js';
+import { SecurityMode, EncryptedMail, ProcessedMailTokens, GroupKeyMaterial, Base64CipherText, AurionStorageDriver, GroupMemberInput } from './types.js';
 import { AurionSearch } from './search.js';
 
 export class AurionSession {
@@ -152,7 +152,7 @@ public async encryptForRecipients(
     return openpgp.readKey({ armoredKey: armored });
   }
 
-  public async generateGroupKeys(aliasEmail: string, memberPublicKeys: string[]): Promise<GroupKeyMaterial> {
+  public async generateGroupKeys(aliasEmail: string, memberPublicKeys: GroupMemberInput[]): Promise<GroupKeyMaterial> {
     return AurionCryptoService.generateGroupKeys(aliasEmail, memberPublicKeys);
   }
 
@@ -243,30 +243,17 @@ public async encryptForRecipients(
     wkd_hash: string;
     shares: Array<{ user_id: string; encrypted_private_key: string }>;
   }> {
-    const memberArmoredPublicKeys = members.map(m => m.public_key);
-    const groupMaterial = await AurionCryptoService.generateGroupKeys(groupEmail, memberArmoredPublicKeys);
+    // 1. On passe directement le tableau de membres (GroupMemberInput[]) au service, 
+    // plus besoin de faire un .map(m => m.public_key)
+    const groupMaterial = await AurionCryptoService.generateGroupKeys(groupEmail, members);
 
-    const armoredGroupPublicKey = groupMaterial.groupPublicKeyArmored;
-    const sharesPayload: Array<{ user_id: string; encrypted_private_key: string }> = [];
-
-    for (const m of members) {
-      const memberKey = await openpgp.readKey({ armoredKey: m.public_key });
-      const fingerprint = memberKey.getFingerprint();
-      const encryptedShare = groupMaterial.encryptedShares[fingerprint];
-      
-      if (encryptedShare) {
-        sharesPayload.push({
-          user_id: m.user_id,
-          encrypted_private_key: AurionCryptoService.toBase64(encryptedShare)
-        });
-      }
-    }
-
+    // 2. Le service renvoie déjà les shares mappés par user_id avec le Base64 appliqué.
+    // On a juste à reconstruire le payload pour l'API Go.
     return {
       identity_id: identityId,
-      armored_public_key: armoredGroupPublicKey,
+      armored_public_key: groupMaterial.groupPublicKeyArmored,
       wkd_hash: wkdHash,
-      shares: sharesPayload
+      shares: groupMaterial.shares
     };
   }
 
