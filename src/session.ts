@@ -325,8 +325,10 @@ public exportArmoredKeyring(): Array<{ email: string; armoredKey: string }> {
   /**
  * Orchestre la génération des clés de l'utilisateur lors de son premier onboarding.
  * * @param userEmail L'adresse e-mail de l'utilisateur qui s'enregistre
+ * @param pass Le mot de passe de l'utilisateur (en clair)
+ * @param salt_client Le sel client pour dériver la passphrase PGP
  */
-public async generateOnboardingKeys(userEmail: string): Promise<{
+public async generateOnboardingKeys(userEmail: string, password: string, salt_client: string): Promise<{
   publicKeyArmored: string;
   privateKeyArmored: string;
 }> {
@@ -335,8 +337,9 @@ public async generateOnboardingKeys(userEmail: string): Promise<{
   }
 
   try {
-    // Appel direct au service cryptographique du SDK
-    const primaryKeyPair = await AurionCryptoService.generatePrimaryKeyPair(userEmail);
+    const h0 = AurionCryptoService.calculateH0(password);
+    const pass  = AurionCryptoService.derivePgpPassphrase(h0, salt_client);
+    const primaryKeyPair = await AurionCryptoService.generatePrimaryKeyPair(userEmail, AurionCryptoService.toHex(pass));
 
     return {
       publicKeyArmored: primaryKeyPair.publicKeyArmored,

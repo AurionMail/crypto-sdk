@@ -241,7 +241,7 @@ export async function decryptWithH0(combinedBase64: string, h0: Uint8Array): Pro
  * Génère une paire de clés OpenPGP (ECC) neuve pour l'onboarding initial.
  * Renvoie la clé publique et la clé privée en clair (armored).
  */
-export async function generatePrimaryKeyPair(userEmail: string): Promise<{
+export async function generatePrimaryKeyPair(userEmail: string, pass: string): Promise<{
   publicKeyArmored: string;
   privateKeyArmored: string;
 }> {
@@ -249,6 +249,7 @@ export async function generatePrimaryKeyPair(userEmail: string): Promise<{
     const { privateKey, publicKey } = await openpgp.generateKey({
       type: 'ecc',
       userIDs: [{ name: userEmail, email: userEmail }],
+      passphrase: pass,
       format: 'armored'
     });
 
