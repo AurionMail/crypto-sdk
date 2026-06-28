@@ -1,6 +1,6 @@
 import * as openpgp from 'openpgp';
 import * as AurionCryptoService from './services/crypto.service.js';
-import { SecurityMode, EncryptedMail, ProcessedMailTokens, GroupKeyMaterial, Base64CipherText, AurionStorageDriver, GroupMemberInput } from './types.js';
+import { SecurityMode, EncryptedMail, ProcessedMailTokens, GroupKeyMaterial, Base64CipherText, AurionStorageDriver, GroupMemberInput, SaltResponse } from './types.js';
 import { AurionSearch } from './search.js';
 
 export class AurionSession {
@@ -349,4 +349,11 @@ public async generateOnboardingKeys(userEmail: string): Promise<{
     throw new Error(`[Session] Échec de la préparation des clés d'onboarding : ${msg}`);
   }
 }
+
+public async generateSalts(): Promise<SaltResponse> {
+  const salt_client = AurionCryptoService.generateSalt();
+  const salt_server = AurionCryptoService.generateSalt();
+  return { salt_client, salt_server };
+}
+
 }
