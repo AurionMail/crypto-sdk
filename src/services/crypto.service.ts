@@ -25,7 +25,9 @@ export function toBase64(str: string): string {
 
 /** Convertit une chaîne Base64 en sa chaîne de caractères originale */
 export function fromBase64(b64: string): string {
-  const binary = atob(b64);
+  // Nettoie les retours à la ligne (\n, \r) et les espaces qui font planter atob()
+  const cleanedB64 = b64.replace(/\s/g, ''); 
+  const binary = atob(cleanedB64);
   const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
   return utf8Decode(bytes);
 }
@@ -95,21 +97,34 @@ export async function encryptForRecipients(
   
   const encrypted = await openpgp.encrypt({ 
     message, 
-    encryptionKeys: keys 
+    encryptionKeys: keys,
+    format: 'armored'
   });
   
-  return toBase64(encrypted);
+  return encrypted as string;
 }
 
-export async function encryptForSelf(privateKey: openpgp.PrivateKey, plaintext: string): Promise<Base64CipherText> {
+export async function encryptForSelf(privateKey: openpgp.PrivateKey, plaintext: string): Promise<string> {
   const publicKey = privateKey.toPublic();
   const message = await openpgp.createMessage({ text: plaintext });
-  const encrypted = await openpgp.encrypt({ message, encryptionKeys: publicKey });
-  return toBase64(encrypted as string);
+  
+  // openpgp.encrypt renvoie une chaîne Armored car format: 'armored' par défaut
+  const encrypted = await openpgp.encrypt({ 
+    message, 
+    encryptionKeys: publicKey,
+    format: 'armored' // Explicite le format standard textuel
+  });
+  
+  return encrypted as string; // Plus de toBase64() inutile !
 }
 
-export async function decryptCiphertext(privateKey: openpgp.PrivateKey, ciphertext: Base64CipherText): Promise<string> {
-  const armored = fromBase64(ciphertext);
+export async function decryptCiphertext(privateKey: openpgp.PrivateKey, ciphertext: string): Promise<string> {
+  let armored = ciphertext;
+  
+  if (!armored.trim().startsWith('-----BEGIN PGP')) {
+    armored = fromBase64(ciphertext);
+  }
+  
   const message = await openpgp.readMessage({ armoredMessage: armored });
   const { data } = await openpgp.decrypt({ message, decryptionKeys: privateKey });
   return data as string;
@@ -141,7 +156,7 @@ export async function generateGroupKeys(
     shares.push({
       user_id: member.user_id,
       // Le btoa (Base64) est appliqué ici
-      encrypted_private_key: btoa(encryptedKeyBundle as string) 
+      encrypted_private_key: toBase64(encryptedKeyBundle as string)
     });
   }
 
@@ -158,7 +173,14 @@ export async function decryptPrivateKeys(
 ): Promise<openpgp.PrivateKey[]> {
   
   const privateKeyPromises = encryptedKeys.map(async (item) => {
-    const armored = fromBase64(item.encrypted_private_key);
+    let armored = item.encrypted_private_key;
+
+    // Si ce n'est PAS du texte brut PGP Armored, alors c'est du Base64, on décode.
+    // Si ça commence déjà par '-----BEGIN', on l'utilise directement.
+    if (!armored.trim().startsWith('-----BEGIN PGP')) {
+      armored = fromBase64(armored);
+    }
+
     return openpgp.readPrivateKey({ armoredKey: armored });
   });
 

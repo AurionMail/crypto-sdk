@@ -51,14 +51,14 @@ export class AurionApiClient {
 
   public async signup(
     email: string, 
-    password: string, 
+    h0: Uint8Array, 
     serverPasswordExternal: string, 
     EncryptedServerPassword: string,
     saltServer: string, 
     saltClient: string
   ): Promise<AuthSessionState> {
     // 1. Génération locale de h0 en RAM (Mot de passe -> Secret local abstrait)
-    const h0 = AurionCryptoService.calculateH0(password);
+   
 
     // 2. Génération de la preuve finale h1 en combinant h0 et le sel serveur
     const serverProof = AurionCryptoService.calculateServerProof(h0, saltServer);

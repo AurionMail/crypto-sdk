@@ -109,9 +109,11 @@ export class AurionSession {
         await this.storageDriver.saveEncryptedH0(combined);
 
       } catch (error) {
+        this.mode = 'Parano';
         console.error("Impossible de sécuriser la session en mode Confort:", error);
         // Fallback de sécurité en mode Parano si l'API WebCrypto échoue localement
-        this.mode = 'Parano';
+        
+        throw new Error("Échec du chiffrement et de la persistance du coffre : " + error);
       }
     }
 
@@ -136,15 +138,15 @@ export class AurionSession {
 public async encryptForRecipients(
   recipientKeys: openpgp.PublicKey | openpgp.PublicKey[], 
   plaintext: string
-): Promise<Base64CipherText> {
+): Promise<string> {
   return AurionCryptoService.encryptForRecipients(recipientKeys, plaintext);
 }
 
-  public async encryptForSelf(plaintext: string, identityEmail?: string): Promise<Base64CipherText> {
+  public async encryptForSelf(plaintext: string, identityEmail?: string): Promise<string> {
     return AurionCryptoService.encryptForSelf(this.getPrivateKeyForIdentity(identityEmail), plaintext);
   }
 
-  public async decryptCiphertext(ciphertext: Base64CipherText, identityEmail?: string): Promise<string> {
+  public async decryptCiphertext(ciphertext: string, identityEmail?: string): Promise<string> {
     return AurionCryptoService.decryptCiphertext(this.getPrivateKeyForIdentity(identityEmail), ciphertext);
   }
 
@@ -213,7 +215,10 @@ public async encryptForRecipients(
       } else {
         const userIds = key.getUserIDs();
         if (userIds.length > 0) {
-          this.identitiesKeyring.set(userIds[0].toLowerCase(), key);
+          // Extraction de l'email via Regex si présent sous la forme "Nom <email>"
+          const emailMatch = userIds[0].match(/<([^>]+)>/);
+          const emailKey = emailMatch ? emailMatch[1] : userIds[0];
+          this.identitiesKeyring.set(emailKey.toLowerCase(), key);
         }
       }
 
@@ -331,6 +336,7 @@ public exportArmoredKeyring(): Array<{ email: string; armoredKey: string }> {
 public async generateOnboardingKeys(userEmail: string, password: string, salt_client: string): Promise<{
   publicKeyArmored: string;
   privateKeyArmored: string;
+  h0: Uint8Array;
 }> {
   if (!userEmail || !userEmail.includes('@')) {
     throw new Error("[Session] L'adresse e-mail fournie pour l'onboarding est invalide.");
@@ -345,7 +351,8 @@ public async generateOnboardingKeys(userEmail: string, password: string, salt_cl
       publicKeyArmored: primaryKeyPair.publicKeyArmored,
       // Cette clé privée en clair sera récupérée en RAM par l'app d'onboarding
       // pour être chiffrée ensuite avec le mot de passe + salt
-      privateKeyArmored: primaryKeyPair.privateKeyArmored
+      privateKeyArmored: primaryKeyPair.privateKeyArmored,
+      h0 : h0
     };
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
