@@ -70,9 +70,9 @@ export class AurionApiClient {
         email, 
         password: serverProof,
         server_password: serverPasswordExternal,
+        encrypted_server_password: EncryptedServerPassword,
         salt_client: saltClient, 
         salt_server: saltServer,
-        encrypted_server_password: EncryptedServerPassword,
       })
     });
 
