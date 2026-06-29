@@ -17,7 +17,6 @@ export interface MailIndexDoc {
   mailboxIds: string[];        // Liste des IDs de dossiers (ex: ["inbox", "sent"])
   text: string;
 }
-export type Base64CipherText = string;
 
 
 export interface NetworkConfig {

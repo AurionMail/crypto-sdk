@@ -1,6 +1,6 @@
 import * as openpgp from 'openpgp';
 import { argon2id as nobleArgon2id } from '@noble/hashes/argon2.js';
-import { Base64CipherText, GroupKeyMaterial, GroupMemberInput } from '../types.js';
+import { GroupKeyMaterial, GroupMemberInput } from '../types.js';
 
 const ARGON2_CONFIG = {
   t: 3,           // Time cost

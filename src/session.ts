@@ -1,6 +1,6 @@
 import * as openpgp from 'openpgp';
 import * as AurionCryptoService from './services/crypto.service.js';
-import { SecurityMode, EncryptedMail, ProcessedMailTokens, GroupKeyMaterial, Base64CipherText, AurionStorageDriver, GroupMemberInput, SaltResponse } from './types.js';
+import { SecurityMode, EncryptedMail, ProcessedMailTokens, GroupKeyMaterial, AurionStorageDriver, GroupMemberInput, SaltResponse } from './types.js';
 import { AurionSearch } from './search.js';
 
 export class AurionSession {
