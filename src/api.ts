@@ -53,6 +53,7 @@ export class AurionApiClient {
     email: string, 
     password: string, 
     serverPasswordExternal: string, 
+    EncryptedServerPassword: string,
     saltServer: string, 
     saltClient: string
   ): Promise<AuthSessionState> {
@@ -70,7 +71,8 @@ export class AurionApiClient {
         password: serverProof,
         server_password: serverPasswordExternal,
         salt_client: saltClient, 
-        salt_server: saltServer
+        salt_server: saltServer,
+        encrypted_server_password: EncryptedServerPassword,
       })
     });
 
