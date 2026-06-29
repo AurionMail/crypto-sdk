@@ -359,4 +359,23 @@ public async generateSalts(): Promise<SaltResponse> {
   return { salt_client, salt_server };
 }
 
+public async getApiTokenFromStorage(): Promise<string> {
+  if (!this.storageDriver) throw new Error("No storage.");
+  if (!this.h0) throw new Error("Vault is locked. Call unlockVault first to generate h0.");
+
+  const encryptedToken = await  this.storageDriver.getItem('api_token') || '';
+  const token = await AurionCryptoService.decryptWithH0(encryptedToken, this.h0);
+  return token;
+}
+
+public async setApiTokenInStorage(apiToken: string): Promise<void> {
+  if (!this.storageDriver) throw new Error("No storage.");
+  if (!this.h0) throw new Error("Vault is locked. Call unlockVault first to generate h0.");
+
+  const encryptedToken = await AurionCryptoService.encryptWithH0(apiToken, this.h0);
+      
+  await this.storageDriver.setItem('api_token', encryptedToken);
+
+}
+
 }
