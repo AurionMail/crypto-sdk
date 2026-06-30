@@ -94,11 +94,16 @@ export class AurionSearch {
    * Recharge l'index complet à partir d'un objet JSON importé
    */
   public importJSON(jsonIndex: string): void {
-    this.searchIndex = MiniSearch.loadJSON(jsonIndex, {
+    console.log("FINAL DEBUG Importing search index from JSON...", jsonIndex);
+    try {
+      this.searchIndex = MiniSearch.loadJSON(jsonIndex, {
       fields: ['text'],
       storeFields: ['id', 'mailboxIds']
     });
-  }
+  }catch (error) {
+    console.error("FINAL DEBUG :Error importing search index:", error);
+    throw error;
+  }}
   public hasDocument(id: string): boolean {
     return this.searchIndex.has(id);
   }
