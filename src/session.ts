@@ -321,6 +321,11 @@ public exportArmoredKeyring(): Array<{ email: string; armoredKey: string }> {
       console.log("[SearchIndex] Type de serialized :", typeof serialized);
 
       let jsonIndex;
+      // Affiche les codes ASCII/Unicode des 5 premiers caractères réels
+      console.log('[DEBUG FIRST CHARS CODES]:', 
+        serialized.split('').slice(0, 5).map(c => `${c} (${c.charCodeAt(0)})`)
+      );
+
       if (typeof serialized === 'string') {
         jsonIndex = JSON.parse(serialized);
       } else {
