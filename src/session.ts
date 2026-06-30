@@ -332,7 +332,7 @@ public exportArmoredKeyring(): Array<{ email: string; armoredKey: string }> {
         // C'est déjà un objet ! Pas besoin de JSON.parse
         jsonIndex = serialized; 
       }
-      
+      console.log('[SearchIndex]Pret a importer.', jsonIndex);
       this.searchEngine.importJSON(jsonIndex);
       console.log('[SearchIndex] Index local restauré en RAM avec succès.');
       return true;
