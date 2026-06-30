@@ -87,7 +87,7 @@ export class AurionSearch {
    * Exporte l'index sous forme d'objet JSON sérialisable
    */
   public exportJSON(): any {
-    return this.searchIndex.toJSON();
+    return JSON.stringify(this.searchIndex);
   }
 
   /**

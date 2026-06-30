@@ -286,8 +286,7 @@ public exportArmoredKeyring(): Array<{ email: string; armoredKey: string }> {
     if (!this.h0) throw new Error("Vault is locked. Cannot encrypt index without h0.");
 
     try {
-      const jsonIndex = this.searchEngine.exportJSON();
-      const serialized = JSON.stringify(jsonIndex);
+      const serialized = this.searchEngine.exportJSON();
       
       // Chiffrement symétrique avec h0 pour garantir le Zero-Knowledge local
       const encryptedIndex = await AurionCryptoService.encryptWithH0(serialized, this.h0);
