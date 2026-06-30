@@ -318,7 +318,15 @@ public exportArmoredKeyring(): Array<{ email: string; armoredKey: string }> {
       console.log('[SearchIndex] dechiffrement avec h0.', this.h0);
       const serialized = await AurionCryptoService.decryptWithH0(encryptedIndex, this.h0);
       console.log('[SearchIndex] parsing.', serialized);
-      const jsonIndex = JSON.parse(serialized);
+      console.log("[SearchIndex] Type de serialized :", typeof serialized);
+
+      let jsonIndex;
+      if (typeof serialized === 'string') {
+        jsonIndex = JSON.parse(serialized);
+      } else {
+        // C'est déjà un objet ! Pas besoin de JSON.parse
+        jsonIndex = serialized; 
+      }
       
       this.searchEngine.importJSON(jsonIndex);
       console.log('[SearchIndex] Index local restauré en RAM avec succès.');
