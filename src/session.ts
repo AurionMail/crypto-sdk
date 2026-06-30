@@ -315,7 +315,9 @@ public exportArmoredKeyring(): Array<{ email: string; armoredKey: string }> {
       }
 
       // Déchiffrement avec h0
+      console.log('[SearchIndex] dechiffrement avec h0.', this.h0);
       const serialized = await AurionCryptoService.decryptWithH0(encryptedIndex, this.h0);
+      console.log('[SearchIndex] parsing.', serialized);
       const jsonIndex = JSON.parse(serialized);
       
       this.searchEngine.importJSON(jsonIndex);
