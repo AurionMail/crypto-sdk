@@ -66,7 +66,7 @@ export class AurionSession {
       // 4. Initialisation sécurisée de h0 en RAM
       this.h0 = new Uint8Array(decryptedBuffer);
       this.mode = 'Confort';
-
+      console.warn("sdk: Reconnexion automatique via le storage driver réussie. Mode de sécurité : Confort. on  tente de loadfromstorage");
       // 5. Restauration automatique de l'index de recherche
       await this.loadSearchIndexFromStorage();
 
